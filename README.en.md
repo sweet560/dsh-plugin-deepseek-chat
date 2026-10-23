@@ -57,8 +57,18 @@ dsh plugin --profile desktop add file:"<absolute path to this repository>"
 
 - The first visit shows the chat.deepseek.com sign-in page; sign in once.
 - Within one app run, switching panels or sessions keeps you signed in.
-- **Sign in again after restarting DSH**: DSH currently gives embedded browsers an in-memory partition (`dsh-sidebar-browser-<uuid>`, no `persist:` prefix), so cookies are dropped when the process exits. This plugin does not modify DSH's installation files, so it cannot bypass that; it will benefit automatically once DSH persists the partition.
+- **Sign in again after restarting DSH**: DSH currently gives embedded browsers an in-memory partition (`dsh-sidebar-browser-<uuid>`, no `persist:` prefix), so cookies are dropped when the process exits. This plugin does not modify DSH's installation files, so it cannot bypass that. To sign in once and stay signed in, apply the equal-length byte patch described in **[docs/login-persistence.md](docs/login-persistence.md)** (script, verification and rollback included).
 - The conversation URL is stored in the app's localStorage (`dsh-plugin-deepseek-chat:last-url`), so the last conversation is restored after a restart (while signed in and while it still exists).
+
+## Persistent login (optional)
+
+DSH hands embedded browsers an **in-memory partition** (`dsh-sidebar-browser-${randomUUID()}`, no `persist:` prefix), so every app restart drops the cookies. To sign in once and stay signed in, replace that partition with a fixed `persist:` one inside `resources/app.asar` — the two statements are the same length, so the archive can be patched byte-for-byte in place.
+
+Cause, script, verification, rollback and per-platform paths:
+
+**→ [docs/login-persistence.md](docs/login-persistence.md)**
+
+Note: this modifies the installed application and is outside DSH's support; a DSH update overwrites `app.asar` and the patch must be re-applied (the `Partitions` data survives). Back up first and proceed at your own risk.
 
 ## Known limitations
 

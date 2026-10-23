@@ -57,8 +57,18 @@ dsh plugin --profile desktop add file:"<本仓库绝对路径>"
 
 - 第一次打开会停在 chat.deepseek.com 的登录页，登录一次即可。
 - 本次 App 运行期间，切换面板/会话不需要重新登录。
-- **重启 DSH 后需要重新登录一次**：DSH 目前给内嵌浏览器的是内存分区（`dsh-sidebar-browser-<uuid>`，没有 `persist:` 前缀），进程退出即清空 cookie。本插件不修改 DSH 的安装文件，所以不会绕过这一限制；等 DSH 提供持久化分区后会自动受益。
+- **重启 DSH 后需要重新登录一次**：DSH 目前给内嵌浏览器的是内存分区（`dsh-sidebar-browser-<uuid>`，没有 `persist:` 前缀），进程退出即清空 cookie。本插件不修改 DSH 的安装文件，所以不会绕过这一限制；想做到「登录一次、长期免登录」，可按 **[docs/login-persistence.md](docs/login-persistence.md)** 做一次等长字节替换（含脚本、验证与回滚）。
 - 会话链接记在 App 的 localStorage（key `dsh-plugin-deepseek-chat:last-url`），重启后仍会打开上次的会话（前提是已登录且该会话仍存在）。
+
+## 登录态持久化（可选，免登录）
+
+DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-${randomUUID()}`，无 `persist:` 前缀），所以每次重启 App 都会清空 cookie。想做到「登录一次、以后不再登录」，需要把桌面主进程里的那行分区名改成固定且带 `persist:` 前缀的值——两条语句**字节数相同**，可以直接在 `resources/app.asar` 里原地替换。
+
+完整原因、脚本、验证步骤、回滚方式和各平台路径都整理在这里：
+
+**→ [docs/login-persistence.md](docs/login-persistence.md)**
+
+注意：这属于对已安装应用的修改，不在 DSH 支持范围内；DSH 升级会覆盖 `app.asar`，需要重新打补丁（`Partitions` 里的登录数据不会丢）。请先备份，风险自负。
 
 ## 已知限制
 
