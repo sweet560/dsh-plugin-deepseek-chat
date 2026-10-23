@@ -118,6 +118,15 @@ test/check-client.mjs  离线自检
 dsh plugin --profile desktop remove dsh-plugin-deepseek-chat
 ```
 
+## 作者
+
+- **作者**：伍悦匿匿
+- **联系方式**：437830488@qq.com
+- **GitHub**：https://github.com/sweet560
+- **博客园**：https://www.cnblogs.com/wuyuenini/
+- **CSDN**：https://blog.csdn.net/weixin_42076389
+- **Gitee**：https://gitee.com/wtt520wyl
+
 ## 许可证
 
 [MIT](LICENSE)
