@@ -4,6 +4,8 @@
 
 在 **DeepSeek Harness（DSH）桌面版**的左侧栏加入 **DeepSeek 聊天** 入口，点开后 `chat.deepseek.com` 直接占满主内容区，并记住上次所在的会话。
 
+> 仓库：[GitHub](https://github.com/sweet560/dsh-plugin-deepseek-chat) ｜ [Gitee 镜像](https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat)
+
 ![面板截图](docs/screenshot.png)
 
 ## 功能
@@ -126,6 +128,7 @@ dsh plugin --profile desktop remove dsh-plugin-deepseek-chat
 - **博客园**：https://www.cnblogs.com/wuyuenini/
 - **CSDN**：https://blog.csdn.net/weixin_42076389
 - **Gitee**：https://gitee.com/wtt520wyl
+- **Gitee 镜像仓库**：https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat
 
 ## 许可证
 

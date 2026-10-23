@@ -4,6 +4,8 @@ English | [中文](README.md)
 
 Adds a **DeepSeek Chat** entry to the **DeepSeek Harness (DSH) desktop** sidebar. Clicking it opens `chat.deepseek.com` full-width in the main area and remembers the last conversation.
 
+> Repository: [GitHub](https://github.com/sweet560/dsh-plugin-deepseek-chat) | [Gitee mirror](https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat)
+
 ![panel screenshot](docs/screenshot.png)
 
 ## Features
