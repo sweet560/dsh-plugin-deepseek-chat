@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DeepSeek Chat",
+    "description": "Adds a chat.deepseek.com panel to the sidebar: full main-area chat with last-conversation memory."
+  }
+}

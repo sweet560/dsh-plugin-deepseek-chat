@@ -1,0 +1,6 @@
+# dsh-plugin-deepseek-chat bundle patch: one insert registers this plugin.
+# insert.name must be the package name; insert.id must be unique across the
+# composed loader tree.
+- insert:
+    - id: deepseek-chat
+      name: 'dsh-plugin-deepseek-chat'

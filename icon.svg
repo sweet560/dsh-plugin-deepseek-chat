@@ -1,0 +1,11 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M8.25 10.5c0-1.52 1.23-2.75 2.75-2.75h14c1.52 0 2.75 1.23 2.75 2.75v10.5c0 1.52-1.23 2.75-2.75 2.75h-9.1l-4.55 3.8c-.78.65-1.95.09-1.95-.93V10.5Z" stroke="url(#chat-bubble)" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M13.4 13.6h9.2M13.4 18h5.6" stroke="#658EFF" stroke-width="2.2" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="chat-bubble" x1="7" y1="8" x2="29" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41E1AC"/>
+      <stop offset="0.65" stop-color="#658EFF"/>
+      <stop offset="1" stop-color="#41E1AC"/>
+    </linearGradient>
+  </defs>
+</svg>
