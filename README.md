@@ -59,7 +59,7 @@ dsh plugin --profile desktop add file:"<本仓库绝对路径>"
 
 - 第一次打开会停在 chat.deepseek.com 的登录页，登录一次即可。
 - 本次 App 运行期间，切换面板/会话不需要重新登录。
-- **重启 DSH 后需要重新登录一次**：DSH 目前给内嵌浏览器的是内存分区（`dsh-sidebar-browser-<uuid>`，没有 `persist:` 前缀），进程退出即清空 cookie。本插件不修改 DSH 的安装文件，所以不会绕过这一限制；想做到「登录一次、长期免登录」，可按 **[docs/login-persistence.md](docs/login-persistence.md)** 做一次等长字节替换（含脚本、验证与回滚）。
+- **重启 DSH 后需要重新登录一次**：DSH 目前给内嵌浏览器的是内存分区（`dsh-sidebar-browser-<uuid>`，没有 `persist:` 前缀），进程退出即清空 cookie。本插件不修改 DSH 的安装文件，所以不会绕过这一限制；想做到「登录一次、长期免登录」，可直接运行仓库自带的补丁脚本 **[docs/patch-dsh-persistent-partition.cjs](docs/patch-dsh-persistent-partition.cjs)**（已适配 `0.2.1-rc.3` 的 ASAR integrity，支持 `--dry-run`、自动备份与全量校验），说明见 **[docs/login-persistence.md](docs/login-persistence.md)**。
 - 会话链接记在 App 的 localStorage（key `dsh-plugin-deepseek-chat:last-url`），重启后仍会打开上次的会话（前提是已登录且该会话仍存在）。
 
 ## 登录态持久化（可选，免登录）
@@ -69,6 +69,18 @@ DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-
 完整原因、脚本、验证步骤、回滚方式和各平台路径都整理在这里：
 
 **→ [docs/login-persistence.md](docs/login-persistence.md)**
+
+补丁脚本（仓库自带，Node 18+，零依赖）：
+
+```powershell
+# 打补丁（自动备份）
+node docs/patch-dsh-persistent-partition.cjs "F:\DeepSeek Harness\resources\app.asar"
+
+# 只检查、不写盘
+node docs/patch-dsh-persistent-partition.cjs "F:\DeepSeek Harness\resources\app.asar" --dry-run
+```
+
+脚本已适配 `0.2.1-rc.3` 的逐文件 ASAR `integrity`（自动重算并同步 `lib/main.js` 的 SHA256），支持幂等重跑（已打补丁直接返回 0）、自动备份、写入前后全量校验，以及 `--dry-run` 预演。
 
 注意：这属于对已安装应用的修改，不在 DSH 支持范围内；DSH 升级会覆盖 `app.asar`，需要重新打补丁（`Partitions` 里的登录数据不会丢）。请先备份，风险自负。
 

@@ -59,7 +59,7 @@ dsh plugin --profile desktop add file:"<absolute path to this repository>"
 
 - The first visit shows the chat.deepseek.com sign-in page; sign in once.
 - Within one app run, switching panels or sessions keeps you signed in.
-- **Sign in again after restarting DSH**: DSH currently gives embedded browsers an in-memory partition (`dsh-sidebar-browser-<uuid>`, no `persist:` prefix), so cookies are dropped when the process exits. This plugin does not modify DSH's installation files, so it cannot bypass that. To sign in once and stay signed in, apply the equal-length byte patch described in **[docs/login-persistence.md](docs/login-persistence.md)** (script, verification and rollback included).
+- **Sign in again after restarting DSH**: DSH currently gives embedded browsers an in-memory partition (`dsh-sidebar-browser-<uuid>`, no `persist:` prefix), so cookies are dropped when the process exits. This plugin does not modify DSH's installation files, so it cannot bypass that. To sign in once and stay signed in, run the bundled patch script **[docs/patch-dsh-persistent-partition.cjs](docs/patch-dsh-persistent-partition.cjs)** (rc.3 ASAR-integrity aware, supports `--dry-run`, automatic backup and full verification); see **[docs/login-persistence.md](docs/login-persistence.md)**.
 - The conversation URL is stored in the app's localStorage (`dsh-plugin-deepseek-chat:last-url`), so the last conversation is restored after a restart (while signed in and while it still exists).
 
 ## Persistent login (optional)
@@ -69,6 +69,18 @@ DSH hands embedded browsers an **in-memory partition** (`dsh-sidebar-browser-${r
 Cause, script, verification, rollback and per-platform paths:
 
 **→ [docs/login-persistence.md](docs/login-persistence.md)**
+
+Bundled patch script (Node 18+, no dependencies):
+
+```powershell
+# Patch (creates a timestamped backup first)
+node docs/patch-dsh-persistent-partition.cjs "F:\DeepSeek Harness\resources\app.asar"
+
+# Dry run: check without writing
+node docs/patch-dsh-persistent-partition.cjs "F:\DeepSeek Harness\resources\app.asar" --dry-run
+```
+
+The script understands the per-file ASAR `integrity` metadata shipped by `0.2.1-rc.3` (it recomputes and syncs `lib/main.js`'s SHA256), is idempotent (already patched returns 0), creates an automatic backup, verifies every block hash before and after writing, and supports `--dry-run`.
 
 Note: this modifies the installed application and is outside DSH's support; a DSH update overwrites `app.asar` and the patch must be re-applied (the `Partitions` data survives). Back up first and proceed at your own risk.
 

@@ -1,6 +1,6 @@
 # 让「DeepSeek 聊天」在 DSH 重启后免登录
 
-> **TL;DR** — DSH 桌面壳目前给内嵌浏览器的是**内存分区**，进程退出即清空 cookie，所以本插件每次重启都要重新登录。把 `resources/app.asar` 里 `lib/main.js` 的那行分区名改成**固定且带 `persist:` 前缀**的值（等长字节替换），登录一次后即可长期免登录。本文给出原因、完整步骤、脚本、验证与回滚方式。
+> **TL;DR** — DSH 桌面壳目前给内嵌浏览器的是**内存分区**，进程退出即清空 cookie，所以本插件每次重启都要重新登录。把 `resources/app.asar` 里 `lib/main.js` 的那行分区名改成**固定且带 `persist:` 前缀**的值（等长字节替换），登录一次后即可长期免登录。仓库自带补丁脚本 [`docs/patch-dsh-persistent-partition.cjs`](patch-dsh-persistent-partition.cjs)，已适配 `0.2.1-rc.3` 的逐文件 ASAR integrity，支持幂等重跑、自动备份、全量校验与 `--dry-run`。
 
 ---
 
@@ -45,7 +45,9 @@ partition = `dsh-sidebar-browser-${randomUUID()}`;
 partition = `persist:dsh-sidebar-browser-chat-v1`;
 ```
 
-两条语句**字节数完全相同**，因此可以直接在 `app.asar` 里做字节级替换：ASAR 头部记录的文件偏移与大小都不变（该构建的头部没有 `integrity` 字段，实测替换后正常启动）。
+两条语句**字节数完全相同**，因此可以直接在 `app.asar` 里做字节级替换：ASAR 头部记录的文件偏移与大小都不变。
+
+> **`0.2.1-rc.3` 起的新变化**：该构建的 ASAR 头部为每个文件记录了 SHA256 `integrity`（`hash` + 按 `blockSize` 分块的 `blocks`），Electron 读取文件时会校验；只替换字节而不同步哈希会触发 `ASAR Integrity Violation` 并强制退出。仓库脚本会自动重算并更新 `lib/main.js` 的 integrity 字段，并在写入前全量核对所有文件的块哈希。
 
 替换后的效果：
 
@@ -57,74 +59,37 @@ partition = `persist:dsh-sidebar-browser-chat-v1`;
 
 ## 3. 操作步骤（Windows）
 
-> 适用于 DSH Desktop `0.2.1-rc.2`（在 Windows 上验证）。其他版本请先按第 5 节确认待替换的字符串仍然存在，再动手。
+> 适用于 DSH Desktop `0.2.1-rc.2` / `0.2.1-rc.3`（在 Windows 上验证）。其他版本请先按第 5 节用 `--dry-run` 确认待替换的字符串仍然存在，再动手。
 
 1. **完全退出 DSH**：托盘图标右键 → 退出（只关窗口是隐藏到托盘，文件仍被占用）。
 2. **备份** `F:\DeepSeek Harness\resources\app.asar`（脚本会自动生成带时间戳的 `.bak-*`，也可以手动复制一份）。
-3. 用下面的脚本做字节替换（Node 20+）。
+3. 用仓库自带的补丁脚本做字节替换（Node 18+；脚本会先做全量体检，失败则不改文件）。
 4. 重新启动 DSH，打开「DeepSeek 聊天」，登录一次。
 5. 退出 DSH 再打开，验证仍是登录状态。
 
 ### 脚本
 
-保存为 `patch-dsh-persistent-partition.mjs`，然后：
+仓库自带补丁脚本：[`docs/patch-dsh-persistent-partition.cjs`](patch-dsh-persistent-partition.cjs)（Node 18+，零依赖）。
 
 ```powershell
-node patch-dsh-persistent-partition.mjs "F:\DeepSeek Harness\resources\app.asar"
+# 打补丁（写入前自动备份为 app.asar.bak-<时间戳>）
+node docs/patch-dsh-persistent-partition.cjs "F:\DeepSeek Harness\resources\app.asar"
+
+# 只预演、不写盘
+node docs/patch-dsh-persistent-partition.cjs "F:\DeepSeek Harness\resources\app.asar" --dry-run
 ```
 
-```js
-// patch-dsh-persistent-partition.mjs
-// Byte-level replacement of DSH's per-guest in-memory browser partition with a
-// fixed persist: partition, so chat logins survive an app restart.
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+脚本行为：
 
-const ORIGINAL = "partition = `dsh-sidebar-browser-${randomUUID()}`;";
-const PATCHED = "partition = `persist:dsh-sidebar-browser-chat-v1`;";
+- **等长替换**：校验两条语句字节数一致，补丁后文件大小不变，ASAR 偏移不受影响；
+- **integrity 同步**：检测到 `lib/main.js` 带 `integrity` 元数据时（`0.2.1-rc.3+`），重算 SHA256 并同步更新 `hash` 与 `blocks`；
+- **幂等**：已打过补丁时直接返回 `0`，可反复执行；
+- **自动备份**：写入前生成带时间戳的 `app.asar.bak-*`；
+- **全量校验**：遍历 ASAR 头部所有文件的 integrity 分块并逐块核对，任一失败则拒绝写入；补丁完成后再次全量校验并打印 `integrity: N file(s) verified, 0 failed`；
+- **`--dry-run`**：完整跑一遍检查并给出结论，但不修改文件；
+- **安全兜底**：目标语句不存在/出现多次、长度不一致、头部 JSON 长度变化、多块 integrity 布局等情况一律中止并返回非 0。
 
-const asar = process.argv[2];
-if (!asar || !existsSync(asar)) {
-  console.error("usage: node patch-dsh-persistent-partition.mjs <path to app.asar>");
-  process.exit(2);
-}
-if (ORIGINAL.length !== PATCHED.length) {
-  console.error("statement lengths differ; refusing to patch");
-  process.exit(1);
-}
-
-const buffer = readFileSync(asar);
-// latin1 maps every byte to one character, so this round-trips unchanged bytes.
-const text = buffer.toString("latin1");
-
-if (text.includes(PATCHED)) {
-  console.log("already patched:", asar);
-  process.exit(0);
-}
-const first = text.indexOf(ORIGINAL);
-if (first === -1) {
-  console.error("target statement not found; this DSH build differs — inspect lib/main.js first");
-  process.exit(1);
-}
-if (text.indexOf(ORIGINAL, first + 1) !== -1) {
-  console.error("target statement appears more than once; aborting");
-  process.exit(1);
-}
-
-const backup = `${asar}.bak-${new Date().toISOString().replaceAll(/[:.]/gu, "-")}`;
-copyFileSync(asar, backup);
-
-const patched = Buffer.from(
-  text.slice(0, first) + PATCHED + text.slice(first + ORIGINAL.length),
-  "latin1"
-);
-if (patched.length !== buffer.length) {
-  console.error("patched size differs from the original; aborting (restore from backup)");
-  process.exit(1);
-}
-writeFileSync(asar, patched);
-console.log("patched:", asar);
-console.log("backup :", backup);
-```
+退出码：`0` 成功或已是补丁态，`1` 拒绝/校验失败，`2` 参数错误。
 
 ### 验证是否生效
 
@@ -136,6 +101,8 @@ Get-Item "$env:APPDATA\@deepseek-ai\dsh-desktop\Partitions\dsh-sidebar-browser-c
 
 - 有该文件且大小非 0 → 分区已持久化；
 - 重启 DSH 打开聊天面板仍是登录态 → 完成。
+
+补丁脚本自身会打印校验结果（`integrity: … 0 failed`）。补充说明：`0.2.1-rc.3` 的 Electron fuse 中 `EnableEmbeddedAsarIntegrityValidation` 为关闭状态，因此 exe 内嵌的 ASAR 头部哈希不会被校验；但 ASAR 的逐文件 integrity 在读取时会被 Electron 校验，所以脚本仍必须同步 `lib/main.js` 的哈希。
 
 ### 回滚
 
@@ -164,12 +131,13 @@ macOS 上若应用有代码签名，修改 `app.asar` 可能破坏签名校验�
 
 - **非官方修改**：改动已安装应用的 `app.asar` 不在 DSH 支持范围内，出问题请用备份回滚；请在动手前确认你接受这个风险。
 - **DSH 升级会覆盖 `app.asar`**：每次更新后需要重新执行一次本补丁；`Partitions` 目录里的登录数据不会丢，重新打补丁后照旧免登录。
-- **版本相关**：字符串在不同 DSH 版本可能变化。补丁前可先确认原文存在：
+- **版本相关**：字符串在不同 DSH 版本可能变化。补丁前先用 `--dry-run` 检查：
 
   ```powershell
-  # 用任意支持字节搜索的工具，或先解出 lib/main.js 检查
-  node -e "const fs=require('fs');const s=fs.readFileSync(process.argv[1]).toString('latin1');console.log(s.includes('dsh-sidebar-browser-${randomUUID()}'))" "F:\DeepSeek Harness\resources\app.asar"
+  node docs/patch-dsh-persistent-partition.cjs "F:\DeepSeek Harness\resources\app.asar" --dry-run
   ```
+
+  输出 `dry-run: patch would be applied` 表示可打补丁；`target statement not found` 表示该版本已变化或官方已内置 `persist:`，请先解出 `lib/main.js` 检查。
 
 - **等长是硬性要求**：脚本会校验长度，不等长直接中止（修改长度会破坏 ASAR 头部记录的偏移）。若要自定义分区名，必须把名字凑成与 `${randomUUID()}` 等长（`persist:` + `dsh-sidebar-browser-` + 7 字符）。
 - **未来版本**：如果 DSH 官方把 guest 分区改成 `persist:`，就不再需要本补丁——升级后先检查原文是否还在，不在即说明已内置支持。
@@ -185,4 +153,4 @@ DSH 自身的登录是 platform.deepseek.com 的 OAuth token（`~/.dsh/.credenti
 
 ---
 
-*本文档基于 DSH Desktop `0.2.1-rc.2` / Windows 验证；其他版本请以第 5 节的检查结果为准。*
+*本文档基于 DSH Desktop `0.2.1-rc.2` / `0.2.1-rc.3` / Windows 验证；其他版本请先运行 `--dry-run` 检查，再决定是否动手。*
