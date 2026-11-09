@@ -14,8 +14,10 @@
   "files": [
     "lib",
     "locale",
-    "docs",
     "scripts",
+    "docs/login-persistence.md",
+    "docs/RELEASE_NOTES_v1.1.1.md",
+    "docs/screenshot.png",
     "icon.svg",
     "cordis.patch.yml",
     "README.md",

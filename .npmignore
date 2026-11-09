@@ -1,0 +1,10 @@
+# Release tarballs are build artifacts, not package contents.
+*.tgz
+
+# The upstream copy of the patch script lives in docs/ for its original README
+# links; the package ships the maintained copy under scripts/ only.
+docs/patch-dsh-persistent-partition.cjs
+
+# Local git/temp artifacts never belong in an npm package.
+.git/
+.tmp_*
