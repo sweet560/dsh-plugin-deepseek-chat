@@ -82,6 +82,27 @@ jobs:
 
       - name: Publish to npm
         if: steps.version.outputs.should_publish == 'true'
-        run: npm publish --access public
+        shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set +e
+          # Preflight: a publish token that cannot even answer whoami is a
+          # token/IP-allowlist problem, not a package-name problem. Surface it
+          # as a check annotation so the failure is diagnosable from outside.
+          npm whoami 2>&1 | tee /tmp/whoami.log
+          who=${PIPESTATUS[0]}
+          if [ "$who" -ne 0 ]; then
+            echo "::error::npm whoami failed with exit $who (token invalid, expired, revoked, or IP allowlist rejects this runner)"
+          fi
+
+          npm publish --access public 2>&1 | tee /tmp/publish.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            # Annotate the npm error lines so the reason is visible on the
+            # commit's checks page even without downloading the raw log.
+            grep -E '^npm (error|warn)' /tmp/publish.log | head -n 6 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit "$code"
+          fi
