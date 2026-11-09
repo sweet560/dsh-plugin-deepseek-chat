@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DeepSeek 聊天",
-    "description": "在左侧栏加入 chat.deepseek.com 聊天面板，占满主内容区并记住上次会话。"
+    "description": "在左侧栏加入 chat.deepseek.com 聊天面板，占满主内容区、记住上次会话，固定登录会话不因切换面板而重新扫码，并显示 DSH 账号状态。"
   }
 }

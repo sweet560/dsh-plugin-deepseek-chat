@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-deepseek-chat",
-  "version": "1.0.0",
-  "description": "DeepSeek Chat (chat.deepseek.com) as a DSH sidebar panel: full main-area chat, last-conversation memory, and crash containment.",
+  "version": "1.1.1",
+  "description": "DeepSeek Chat (chat.deepseek.com) as a DSH sidebar panel: full main-area chat, last-conversation memory, DSH account awareness, a stable login session, and crash containment.",
   "type": "module",
   "main": "lib/index.js",
   "icon": "./icon.svg",
@@ -14,10 +14,13 @@
   "files": [
     "lib",
     "locale",
+    "docs",
+    "scripts",
     "icon.svg",
     "cordis.patch.yml",
     "README.md",
     "README.en.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
@@ -42,7 +45,7 @@
   "homepage": "https://github.com/sweet560/dsh-plugin-deepseek-chat#readme",
   "engines": {
     "node": ">=20",
-    "dsh": ">=0.2.1-rc.2"
+    "dsh": ">=0.2.2-rc.1"
   },
   "dsh": {
     "manifestVersion": 1,

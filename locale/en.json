@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DeepSeek Chat",
-    "description": "Adds a chat.deepseek.com panel to the sidebar: full main-area chat with last-conversation memory."
+    "description": "Adds a chat.deepseek.com panel to the sidebar: full main-area chat with last-conversation memory, a stable login session across panel switches, and DSH account status."
   }
 }
