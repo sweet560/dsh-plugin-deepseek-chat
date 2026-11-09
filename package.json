@@ -1,5 +1,5 @@
 {
-  "name": "dsh-plugin-deepseek-chat",
+  "name": "@tianyulinfeng1/dsh-plugin-deepseek-chat",
   "version": "1.1.1",
   "description": "DeepSeek Chat (chat.deepseek.com) as a DSH sidebar panel: full main-area chat, last-conversation memory, DSH account awareness, a stable login session, and crash containment.",
   "type": "module",
@@ -37,6 +37,9 @@
   ],
   "author": "sweet560",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sweet560/dsh-plugin-deepseek-chat.git"

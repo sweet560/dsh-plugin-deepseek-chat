@@ -43,6 +43,14 @@ All notable changes to this project are documented here.
 - `app.asar` patch verified independently: 20519 files, 0 integrity failures;
   `lib/main.js` header hash matches the actual SHA256 of the patched bytes.
 
+### Packaging
+
+- Published to npm as **`@tianyulinfeng1/dsh-plugin-deepseek-chat`** (the
+  registry name this project owns). `package.json` and `cordis.patch.yml` now
+  carry that scoped package name so an npm-installed copy mounts under the same
+  `deepseek-chat` bundle id; the GitHub install routes (`github:sweet560/...`)
+  are unchanged.
+
 ## 1.1.0 — 2026-11-09
 
 - Added support for DSH `0.2.2-rc.1` (`engines.dsh >=0.2.2-rc.1`).

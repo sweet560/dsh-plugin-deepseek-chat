@@ -31,7 +31,17 @@
 
 ## 安装
 
-### 方式一：插件页安装（推荐）
+npm 包名：**`@tianyulinfeng1/dsh-plugin-deepseek-chat`**（GitHub 仓库名仍是 `dsh-plugin-deepseek-chat`）。
+
+### 方式一：npm（推荐）
+
+```powershell
+dsh plugin --profile desktop add @tianyulinfeng1/dsh-plugin-deepseek-chat
+```
+
+插件页的「安装第三方插件」里也可以直接填包名 `@tianyulinfeng1/dsh-plugin-deepseek-chat`。
+
+### 方式二：插件页安装（GitHub）
 
 1. 打开 DSH 桌面版，左侧栏点 **插件**。
 2. 点列表上方的 **安装第三方插件**。
@@ -45,7 +55,7 @@
 4. 点 **安装**，等 pnpm 跑完（首次会拉取仓库并安装依赖）。
 5. 安装完成后插件自动启用，左侧栏出现 **DeepSeek 聊天**。
 
-### 方式二：命令行
+### 方式三：命令行（GitHub）
 
 ```powershell
 dsh plugin --profile desktop add github:sweet560/dsh-plugin-deepseek-chat
@@ -53,7 +63,7 @@ dsh plugin --profile desktop add github:sweet560/dsh-plugin-deepseek-chat
 
 装完打开 **插件 → 已安装插件**，确认「DeepSeek 聊天」处于启用状态（命令行只负责装依赖，启用状态以插件页为准）。
 
-### 方式三：本地目录（二次开发）
+### 方式四：本地目录（二次开发）
 
 ```powershell
 dsh plugin --profile desktop add file:"<本仓库绝对路径>"
@@ -158,7 +168,7 @@ test/check-client.mjs  离线自检
 ## 卸载
 
 ```powershell
-dsh plugin --profile desktop remove dsh-plugin-deepseek-chat
+dsh plugin --profile desktop remove @tianyulinfeng1/dsh-plugin-deepseek-chat
 ```
 
 ## 作者

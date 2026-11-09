@@ -31,7 +31,17 @@ Adds a **DeepSeek Chat** entry to the **DeepSeek Harness (DSH) desktop** sidebar
 
 ## Install
 
-### Option 1 — Plugins page (recommended)
+npm package: **`@tianyulinfeng1/dsh-plugin-deepseek-chat`** (the GitHub repository is still named `dsh-plugin-deepseek-chat`).
+
+### Option 1 — npm (recommended)
+
+```powershell
+dsh plugin --profile desktop add @tianyulinfeng1/dsh-plugin-deepseek-chat
+```
+
+You can also enter the package name `@tianyulinfeng1/dsh-plugin-deepseek-chat` in the Plugins page.
+
+### Option 2 — Plugins page (GitHub)
 
 1. Open DSH desktop and click **Plugins** in the sidebar.
 2. Click **Install a third-party plugin** above the list.
@@ -45,7 +55,7 @@ Adds a **DeepSeek Chat** entry to the **DeepSeek Harness (DSH) desktop** sidebar
 4. Click **Install** and wait for pnpm to finish.
 5. The plugin is enabled automatically; **DeepSeek Chat** appears in the sidebar.
 
-### Option 2 — CLI
+### Option 3 — CLI (GitHub)
 
 ```powershell
 dsh plugin --profile desktop add github:sweet560/dsh-plugin-deepseek-chat
@@ -53,7 +63,7 @@ dsh plugin --profile desktop add github:sweet560/dsh-plugin-deepseek-chat
 
 Then open **Plugins → Installed plugins** and make sure **DeepSeek Chat** is switched on (the CLI only installs the package).
 
-### Option 3 — local checkout (development)
+### Option 4 — local checkout (development)
 
 ```powershell
 dsh plugin --profile desktop add file:"<absolute path to this repository>"
@@ -148,7 +158,7 @@ test/check-client.mjs  offline self-check
 ## Uninstall
 
 ```powershell
-dsh plugin --profile desktop remove dsh-plugin-deepseek-chat
+dsh plugin --profile desktop remove @tianyulinfeng1/dsh-plugin-deepseek-chat
 ```
 
 ## License
