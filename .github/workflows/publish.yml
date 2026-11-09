@@ -1,0 +1,87 @@
+# 自动把仓库更新发布到 npm (registry.npmjs.org)。
+# 触发：推到 main、打 v* tag、发布 GitHub Release，或在 Actions 页面手动运行。
+#
+# 关键约束 —— npm 版本不可变：同一个 version 只能 publish 一次，重复发布会被 registry 拒绝。
+# 因此「更新后自动推送」的正确语义是：当 package.json 的 version 变成 registry 上
+# 尚不存在的值时自动发布；没改版本号的 push 会被下面的幂等守卫安全跳过，不会报错。
+#
+# 一次性前提：GitHub 仓库已创建 Environment「npm-更新」，并在
+# Settings -> Secrets and variables -> Actions（或该 Environment 的 Secrets）配置了
+# NPM_TOKEN = npmjs.com 上属于包 owner、对本包有 publish 权限的 Automation token。
+# 注意：本地直连发布曾因 npm 的 IP / 2FA 策略返回 403，而 GitHub-hosted runner 出口 IP
+# 不同，故不要给该 token 设置 Allowed IP ranges 白名单。
+# 下面的 environment: 必须存在 —— 否则 Environment 级 secret 不会注入作业。
+# setup-node 的 registry-url 会生成 .npmrc，npm publish 通过 NODE_AUTH_TOKEN 读取该 token。
+
+name: publish
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一 ref 的发布串行执行且不被后续触发取消，避免并发抢注同一个版本号。
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # 绑定 GitHub Environment「npm-更新」：其 Environment 级 secret (NPM_TOKEN) 只有在
+    # 作业声明 environment 后才会注入；中文名作为 YAML 普通标量是合法的。
+    environment: npm-更新
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 与 package.json 的 engines.node >=20 及现有 test.yml 的 Node 20 保持一致。
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      # 发布前质量门：复用 .github/workflows/test.yml 的离线自检脚本。
+      # 本仓库零运行时依赖、无 lock 文件，test 是纯 node 脚本，无需 npm install。
+      - name: Self-check
+        run: npm test
+
+      # 幂等守卫：仅当该版本在 registry 上还不存在时才发布。
+      - name: Check if version is already published
+        id: version
+        shell: bash
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::$NAME@$VERSION already on npm - skip (bump package.json version to publish)."
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$NAME@$VERSION not published yet - will publish."
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 需要发布但没配 secret 时，给出明确错误，而不是一条含糊的鉴权失败。
+      - name: Verify NPM_TOKEN
+        if: steps.version.outputs.should_publish == 'true'
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is missing. Add an npm Automation token in Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Publish to npm
+        if: steps.version.outputs.should_publish == 'true'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
