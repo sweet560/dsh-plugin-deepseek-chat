@@ -254,7 +254,13 @@ sandbox.globalThis = sandbox;
 runInNewContext(source, sandbox, { filename: bundlePath });
 
 if (!registration) throw new Error("bundle did not call window.__ModuleLoader__.load");
-if (registration.id !== "dsh-plugin-deepseek-chat") fail(`unexpected bundle id: ${registration.id}`);
+// Regression (web-boot crash): the factory id MUST equal package.json "name".
+// The Host keys client graph rows by the package name; a mismatch makes
+// arrive() re-execute the same bundle script and throw "duplicate factory
+// registration" during web boot.
+const pkgName = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8")).name;
+if (registration.id !== pkgName) fail(`factory id ${registration.id} != package name ${pkgName}: web boot will re-execute the bundle and throw "duplicate factory registration"`);
+else ok(`factory id matches package name (${registration.id})`);
 ok(`bundle id = ${registration.id}`);
 
 const moduleExports = registration.factory((id) => {

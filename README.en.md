@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-> **Current version: v1.1.1** | Targets DSH **0.2.2-rc.1**
+> **Current version: v1.1.2** | Targets DSH **0.2.2-rc.1**
 
 Adds a **DeepSeek Chat** entry to the **DeepSeek Harness (DSH) desktop** sidebar. Clicking it opens `chat.deepseek.com` full-width in the main area, remembers the last conversation, and shows the current DSH account state.
 
@@ -20,6 +20,8 @@ Adds a **DeepSeek Chat** entry to the **DeepSeek Harness (DSH) desktop** sidebar
 - **DSH account status**: a strip shows "Synced with the DSH account · name" / "No account" / "Account state unavailable" via the official `ctx.remote.account` Remote. **Display only — it never participates in the guest lifecycle.**
 - **Crash containment**: if the embedded page's process dies, is destroyed, or never starts, the panel shows a Retry card — the app window no longer goes blank (fixed in v0.4.0).
 - Inert on the plain Web surface (`dsh web`): the site sends `frame-ancestors 'none'`, so an iframe cannot carry it, and the guest bridge only exists in the desktop shell.
+
+> **v1.1.2 web boot crash fix**: v1.1.1 renamed the npm package to the scoped `@tianyulinfeng1/dsh-plugin-deepseek-chat`, but the client-bundle factory id in `lib/client.js` stayed the old short name `dsh-plugin-deepseek-chat`. That mismatch made the DSH Host re-execute the same bundle and throw `duplicate factory registration`, ending in `web boot: 1 entry did not activate` and a failed page boot. v1.1.2 aligns the factory id with the full package name and adds a regression assertion that the factory id must equal `package.json`'s `name`. See [docs/RELEASE_NOTES_v1.1.2.md](docs/RELEASE_NOTES_v1.1.2.md).
 
 ## Requirements
 
@@ -131,6 +133,7 @@ The current implementation guards every guest call behind an `isConnected` check
 
 | Version | Changes |
 |---|---|
+| **1.1.2** | **Fixes the v1.1.1 web boot crash (highlight)**: the client-bundle factory id did not match the npm package name, so DSH re-executed the same bundle, threw `duplicate factory registration`, and failed with `1 entry did not activate` — the whole page would not boot. The factory id in `lib/client.js` is now aligned to `@tianyulinfeng1/dsh-plugin-deepseek-chat`, with a new regression assertion that it must equal `package.json`'s `name`; 35/35 offline checks pass and all 30 client bundles scan with 0 mismatches. See [docs/RELEASE_NOTES_v1.1.2.md](docs/RELEASE_NOTES_v1.1.2.md). |
 | **1.1.1** | **Fixes the "scan the QR code again on every panel switch" regression**: the guest partition and conversation key are constants; account state is display-only and never touches the guest lifecycle; a transient `unknown` is ignored; the guest no longer waits for the async probe; self-check now asserts a fixed partition and no rebuild on state churn (35 cases). Documents why a pure plugin cannot reuse the DSH token. |
 | 1.1.0 | DSH `0.2.2-rc.1`: DSH account status strip; correct generated Remote envelope parsing; stricter conversation and popup URL validation; dead guest removal on failure. **This release keyed the partition to account state and broke login persistence (fixed in 1.1.1).** |
 | 1.0.0 | First local release: sidebar entry, full-width chat, conversation memory, crash containment. |

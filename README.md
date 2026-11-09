@@ -2,7 +2,7 @@
 
 [English](README.en.md) | 中文
 
-> **当前版本：v1.1.1** ｜适配 DSH **0.2.2-rc.1**
+> **当前版本：v1.1.2** ｜适配 DSH **0.2.2-rc.1**
 
 在 **DeepSeek Harness（DSH）桌面版**的左侧栏加入 **DeepSeek 聊天** 入口，点开后 `chat.deepseek.com` 直接占满主内容区，记住上次所在的会话，并显示当前 DSH 账号状态。
 
@@ -20,6 +20,8 @@
 - **DSH 账号状态展示**：面板顶部条显示「已与 DSH 登录账号同步 · 昵称」/「未登录」/「账号状态不可用」，通过官方 `ctx.remote.account` 读取；**仅作展示，绝不参与 guest 生命周期**。
 - **崩溃隔离**：内嵌页进程退出、被销毁或启动超时，只在面板里显示「重试」，不会再出现整个 App 变空白窗口的问题（v0.4.0 修复，见下文）。
 - 纯 Web 表层（`dsh web` 在浏览器里打开）自动不注册——该站点 `frame-ancestors 'none'`，iframe 嵌不了，guest 租约桥也只有桌面壳提供。
+
+> **v1.1.2 修复（web boot 启动失败）**：v1.1.1 把 npm 包名改为带 scope 的 `@tianyulinfeng1/dsh-plugin-deepseek-chat` 后，`lib/client.js` 里 client bundle 的工厂 id 仍是旧短名 `dsh-plugin-deepseek-chat`，两者不一致使 DSH Host 重复执行同一 bundle、抛出 `duplicate factory registration`，最终 `web boot: 1 entry did not activate`、整个页面启动失败。v1.1.2 已把工厂 id 对齐为完整包名，并在离线自检中新增「工厂 id 必须等于 `package.json` 的 `name`」回归断言。详见 [docs/RELEASE_NOTES_v1.1.2.md](docs/RELEASE_NOTES_v1.1.2.md)。
 
 ## 环境要求
 
@@ -138,6 +140,7 @@ DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-
 
 | 版本 | 内容 |
 |---|---|
+| **1.1.2** | **修复 v1.1.1 的 web boot 启动失败（重点）**：工厂 id 与 npm 包名不一致 → DSH 重复执行同一 bundle → `duplicate factory registration` → `1 entry did not activate`、整个页面打不开。已把 `lib/client.js` 工厂 id 对齐为 `@tianyulinfeng1/dsh-plugin-deepseek-chat`，并新增「工厂 id 必须等于 `package.json` 的 `name`」回归断言；离线自检 35 项全过、30 个 client bundle 扫描 0 不匹配。详见 [docs/RELEASE_NOTES_v1.1.2.md](docs/RELEASE_NOTES_v1.1.2.md)。 |
 | **1.1.1** | **修复每次切回面板/重启都要重新扫码的回归**：guest 分区与会话 key 固定为常量，账号状态仅作展示、不参与 guest 生命周期；瞬时 `unknown` 被忽略；guest 不再等待异步账号探测；自检改为验证固定分区与状态抖动不重建（35 项）。明确记录「纯插件无法免扫码复用 DSH token」的源码结论。 |
 | 1.1.0 | 支持 DSH `0.2.2-rc.1`：新增 DSH 账号状态条；修正生成式 Remote 信封解析；收紧会话 URL 与弹窗 URL 校验；失败时移除失效 guest。**此版把分区绑到账号状态，导致登录态抖动（已由 1.1.1 修复）**。 |
 | 1.0.0 | 首个本地版本：侧栏入口、全宽内嵌聊天、会话记忆、崩溃隔离。 |

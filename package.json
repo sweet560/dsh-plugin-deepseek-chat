@@ -1,6 +1,6 @@
 {
   "name": "@tianyulinfeng1/dsh-plugin-deepseek-chat",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "DeepSeek Chat (chat.deepseek.com) as a DSH sidebar panel: full main-area chat, last-conversation memory, DSH account awareness, a stable login session, and crash containment.",
   "type": "module",
   "main": "lib/index.js",
@@ -17,6 +17,7 @@
     "scripts",
     "docs/login-persistence.md",
     "docs/RELEASE_NOTES_v1.1.1.md",
+    "docs/RELEASE_NOTES_v1.1.2.md",
     "docs/screenshot.png",
     "icon.svg",
     "cordis.patch.yml",
