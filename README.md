@@ -2,7 +2,7 @@
 
 [English](README.en.md) | 中文
 
-> **当前版本：v1.1.5** ｜适配 DSH **0.2.2-rc.1**
+> **当前版本：v1.1.6** ｜适配 DSH **0.2.2-rc.1**
 
 在 **DeepSeek Harness（DSH）桌面版**加入 **DeepSeek 聊天**：左侧栏图标入口、会话顶栏标签页（默认名「DeepSeek 聊天」，可在设置页开关 / 自定义），点开后 `chat.deepseek.com` 铺满会话区，记住上次所在的会话；提供**设置页面**（含插件基础信息与「检查更新」按钮），面板为**纯网页聊天**，不显示账号状态。
 
@@ -158,6 +158,7 @@ DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-
 
 | 版本 | 内容 |
 |---|---|
+| **1.1.6** | **OIDC 可信发布链路测试**：`.github/workflows/publish.yml` 启用 `permissions.id-token: write`、Node 22、`npm@latest`、`npm publish --provenance`，移除 `NODE_AUTH_TOKEN` 与 `environment` 声明；版本号升到 `1.1.6` 推送 GitHub，实测 GitHub Actions 能否经 npm Trusted Publisher 自动发布。功能与 1.1.5 相同，仅发布链路变更。 |
 | **1.1.5** | **设置页新增关于信息 + 检查更新**：新增插件版本号 / 作者 / 功能简介 / 许可证 / npm·GitHub 链接，以及「检查更新」按钮（npm `dist-tags` 优先、GitHub `raw` 兜底、数字逐段版本比较、文字状态 + 跳转链接、8 秒超时与失败兜底）；元信息常量与 `package.json` 一致性断言、离线自检全部通过（`RESULT: PASS`）。 |
 | **1.1.4** | **新增设置页 + 顶栏标签可配置 + 网页铺满会话区**：新增 `settings.section` 设置页（开关顶部标签栏、自定义标签名默认「DeepSeek 聊天」，localStorage 持久化、即时重注入刷新标签行）；顶栏标签用不透明绝对定位浮层铺满会话 body、盖住 composer 输入框；图2 网页内标题胶囊按用户确认不处理。四处槽位注册、离线自检全部通过（`RESULT: PASS`）。 |
 | **1.1.3** | **移除账号状态显示 + 新增会话顶栏标签页**：彻底删除账号状态条、账号探测、5 秒轮询、账号同步 store；新增 `conversation.view` 顶栏「网页聊天」标签（与左侧栏/全屏面板共用组件与固定分区）；三处槽位注册改为各自独立 try/catch。离线自检全部通过（`RESULT: PASS`）。 |

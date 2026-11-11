@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.6 — 2026-11-11
+
+### OIDC 可信发布（Trusted Publishing）链路测试
+
+- **`.github/workflows/publish.yml` 改为 OIDC 模式**：新增
+  `permissions.id-token: write`（OIDC 必需）、`node-version: 22`（≥ 22.14.0）、
+  `npm install -g npm@latest`（npm CLI ≥ 11.5.1）、
+  `npm publish --provenance --access public`；删除 `NODE_AUTH_TOKEN` 环境变量、
+  `environment: npm-更新` 声明与 `NPM_TOKEN` 校验步骤；保留
+  `registry-url: https://registry.npmjs.org`、`runs-on: ubuntu-latest`、
+  `repository.url` 与 GitHub 仓库精确匹配。
+- **Environment 留空**：GitHub 仓库未创建任何 Environment（`environments` 接口
+  `total_count: 0`），与 npm 端 Trusted Publisher 的 Environment name 可选留空
+  一致，因此 workflow 不声明 `environment:`。
+- **纯发布链路测试**：功能与 1.1.5 完全相同，仅把版本号升到 `1.1.6` 并推送
+  GitHub `main`（不打 tag，避免重复触发 CI），用一次真实的 Actions 运行验证
+  npm 端 Trusted Publisher 是否已正确配置并允许 `npm publish`。
+- **Verification**：`node --check lib/client.js` 通过；`npm test` 全部通过
+  （元信息版本一致性等断言随 `package.json` 同步到 `1.1.6`）。
+
 ## 1.1.5 — 2026-11-11
 
 ### 设置页新增「关于本插件」与「检查更新」

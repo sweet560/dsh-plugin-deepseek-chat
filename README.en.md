@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-> **Current version: v1.1.5** | Targets DSH **0.2.2-rc.1**
+> **Current version: v1.1.6** | Targets DSH **0.2.2-rc.1**
 
 Adds **DeepSeek Chat** to the **DeepSeek Harness (DSH) desktop**: a sidebar icon entry and a conversation-header tab (default name **DeepSeek Chat**, configurable). Clicking either opens `chat.deepseek.com` filling the conversation area and remembers the last conversation. A **settings page** (with plugin metadata and a "Check for updates" button) lets you show/hide the header tab and rename it. The panel is **pure web chat** — no account status strip.
 
@@ -150,6 +150,7 @@ The current implementation guards every guest call behind an `isConnected` check
 
 | Version | Changes |
 |---|---|
+| **1.1.6** | **OIDC trusted-publishing pipeline test**: `.github/workflows/publish.yml` now enables `permissions.id-token: write`, Node 22, `npm@latest`, `npm publish --provenance`, and removes `NODE_AUTH_TOKEN` and the `environment` declaration. Version bumped to `1.1.6` and pushed to GitHub to test whether GitHub Actions can publish via npm Trusted Publisher. No functional change from 1.1.5. |
 | **1.1.5** | **Adds About info + Check for updates to Settings**: plugin version / author / description / license / npm & GitHub links, plus a "Check for updates" button (npm `dist-tags` first, GitHub `raw` fallback, numeric segment-by-segment version comparison, text status + jump links, 8-second timeout and failure fallbacks). Metadata constants are asserted equal to `package.json`; offline self-check passes fully (`RESULT: PASS`). |
 | **1.1.4** | **Adds a settings page + makes the header tab configurable + fills the conversation area**: a `settings.section` page (show/hide header tab, custom tab name default "DeepSeek Chat", localStorage persistence, immediate re-registration for the tab row); the header entry uses an opaque absolute overlay to fill the conversation body and cover the composer. The red-boxed in-page title chip is left untouched per user confirmation. Four slot registrations, offline self-check passes fully (`RESULT: PASS`). |
 | **1.1.3** | **Removes the account status display + adds a conversation-header tab**: deletes the account status strip, probe, 5-second polling and account-sync store; adds a `conversation.view` "Web Chat" header tab sharing the component and fixed partition with the sidebar/full-area entries; three slot registrations now use independent try/catch blocks. Offline self-check passes fully (`RESULT: PASS`). |
