@@ -1,0 +1,62 @@
+name: Sync to Gitee
+
+# GitHub 仓库 main 有更新后，自动把 main 与全部标签镜像到 Gitee。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # 也支持在 Actions 页面手动点一次，方便测试
+
+permissions:
+  contents: read
+
+# 避免多次推送同时改写 Gitee，排队执行而不是互相取消
+concurrency:
+  group: sync-gitee
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: 镜像 main 与标签到 Gitee
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取完整历史（含所有分支与标签）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: 安装 Gitee SSH 私钥
+        env:
+          GITEE_SSH_PRIVATE_KEY: ${{ secrets.GITEE_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITEE_SSH_PRIVATE_KEY:-}" ]; then
+            echo "::error::GitHub 仓库 Secret GITEE_SSH_PRIVATE_KEY 未配置，无法推送到 Gitee"
+            exit 1
+          fi
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "$GITEE_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_rsa"
+          chmod 600 "$HOME/.ssh/id_rsa"
+
+      - name: 推送 main 与全部标签到 Gitee
+        env:
+          GITEE_REPO: git@gitee.com:wtt520wyl/dsh-plugin-deepseek-chat.git
+        run: |
+          set -euo pipefail
+          export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i $HOME/.ssh/id_rsa"
+          git remote add gitee "$GITEE_REPO"
+
+          # 把 GitHub 侧的 main 与全部标签取到独立的 refs/sync 命名空间，
+          # 不依赖 checkout 内部创建的 refs/remotes/origin/* 引用
+          git fetch --quiet --force origin \
+            '+refs/heads/main:refs/sync/main' \
+            '+refs/tags/*:refs/tags/*'
+
+          # 只推 main 与 tags，不推 refs/remotes、refs/pull 等本地引用
+          # --force 让 Gitee 与 GitHub 对齐；--prune 清掉 Gitee 上多余的标签
+          git push --force --prune gitee \
+            'refs/sync/main:refs/heads/main' \
+            'refs/tags/*:refs/tags/*'
+
+          echo "=== 同步完成后 Gitee 上的引用 ==="
+          git ls-remote gitee
