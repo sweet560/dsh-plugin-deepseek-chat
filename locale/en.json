@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DeepSeek Chat",
-    "description": "Adds a chat.deepseek.com panel to the sidebar: full main-area chat with last-conversation memory, a stable login session across panel switches, and DSH account status."
+    "description": "Adds a chat.deepseek.com panel to the sidebar and a configurable conversation-header tab (default \"DeepSeek Chat\"): fills the whole conversation area, remembers the last conversation, keeps a stable login session, and offers a settings page to toggle/rename the tab, show plugin metadata (version, author, description, license, npm/GitHub links), and check for updates against npm/GitHub — pure web chat with no account status strip."
   }
 }

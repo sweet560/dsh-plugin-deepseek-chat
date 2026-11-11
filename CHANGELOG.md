@@ -2,6 +2,130 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.5 — 2026-11-11
+
+### 设置页新增「关于本插件」与「检查更新」
+
+- **基础信息区块**：设置页展示插件版本号（`1.1.5`）、作者（`sweet560`）、
+  功能简介、开源许可证（`MIT`），以及两个 `https` 外链（npm 插件页面 /
+  GitHub 仓库，`target="_blank"` 由桌面壳用系统浏览器打开）。这些值以
+  模块级常量保存（client bundle 不能 import package.json），并由离线自检
+  逐字段断言与 `package.json` 一致——沿用 factory id === 包名的回归思路。
+- **「检查更新」按钮**：点击后从公开 JSON 接口读取最新发布版本号，
+  **npm 优先、GitHub 兜底**：
+  - npm：`https://registry.npmjs.org/-/package/@tianyulinfeng1%2fdsh-plugin-deepseek-chat/dist-tags`（取 `latest`）；
+  - GitHub：`https://raw.githubusercontent.com/sweet560/dsh-plugin-deepseek-chat/main/package.json`（取 `version`，避开 `api.github.com` 的限流）。
+  两处都带宽松 CORS、主窗口未设置 `connect-src` CSP 限制，因此直接用
+  renderer 的 `fetch()` 即可，**不新增 Host 同源回环路由**、`lib/index.js`
+  空宿主半侧保持不变。每个请求带 8 秒 `AbortController` 超时。
+- **版本比较用数字逐段比较**（`compareVersion()`），不用字符串相等：
+  本地未发版的 `1.1.5` 会领先已发布的 `latest`（实测 `1.1.2`），此时显示
+  「已是最新版本」而非误报有更新；仅当远端版本更高才显示「发现新版本」。
+- **文字状态 + 跳转链接**：状态行显示「点击按钮… / 正在检查更新… /
+  已是最新版本 / 发现新版本 x.y.z / 检查更新失败：原因」，并在检查结束后
+  附带 npm / GitHub 跳转链接。检查中按钮禁用且忽略重复点击；网络不可用、
+  两个来源都失败、没有可用 fetch 时都给出失败兜底，异常不外泄。
+- **Verification**：`node --check lib/client.js` 通过；`npm test` 全部通过
+  （新增基础信息常量一致性、语义版本比较、载荷解析、npm/GitHub 兜底、
+  检查更新各状态分支、设置页渲染与点击联动等断言）；`git diff --check` 通过。
+- **Packaging**：`package.json` / `lib/client.js` / `README.md` /
+  `README.en.md` / `locale/*.json` / `CHANGELOG.md` 同步升到 `1.1.5`。
+
+## 1.1.4 — 2026-11-11
+
+### 新增设置页 + 顶栏标签页可配置 + 网页铺满会话区
+
+- **新增设置页**：通过官方 `settings.section` 槽注册「DeepSeek 聊天」设置页
+  （`id: deepseek-chat-settings`、`order: 48`），沿用 `dsh-wechat-reminder` 等
+  插件相同的 localStorage 配置范式。设置项：
+  - **显示顶部标签栏**（`showTab`，默认 `true`）：关闭后移除
+    `conversation.view` 注册，只保留左侧栏图标 + 全屏主面板入口；
+  - **顶部标签栏名称**（`tabLabel`，默认 `DeepSeek 聊天`）：可自定义，
+    留空自动回退默认，最长 40 字符。名称输入框默认为**空白**，仅以灰色
+    占位提示显示默认名；点击输入框即可直接输入新名字，无需先删默认文字
+    （组件内 `draft` state：默认名不写入 `value`，纯空白输入立即清空
+    draft 以恢复灰提示）。
+- **配置持久化**：`window.localStorage` 独立键
+  `dsh-plugin-deepseek-chat:config`（与会话记忆 `…:last-url` 分离）；
+  `readConfig()` 按类型校验字段，损坏的 JSON / 错误类型一律回退默认；
+  `writeConfig()` 合并 patch 后通知订阅者；`subscribeConfig()` 返回的
+  disposer 在 `ctx.effect` 清理时调用。
+- **标签行即时刷新**：`conversation.view` 的标签行只在槽注册表增删 /
+  locale 变化时重算（`dsh-client-ui-conversation` 的 `viewTabs()` +
+  `slots.subscribe("conversation.view", refreshViews)`），label thunk 本身
+  不订阅配置。因此 `syncView()` 在开关或名称变化时先 dispose 旧的注册、
+  再重新 `ctx.slots.inject("conversation.view", …)`，让顶栏立刻显示新名字
+  或隐藏标签。`main` / `sidebar.panellist` / `settings.section` 三处注册
+  保持静态、各自独立 try/catch。
+- **图3 修复：网页铺满会话区、盖住输入框**：选中「网页聊天」标签时，
+  DSH 自身的对话消息与底部 composer 输入框（`.an3WzG_composerSeat`，
+  `z-index: 9`）仍露在网页下方。原因是 `viewArea`（含本插件 webview）与
+  `composerSeat` 是 `scrollBody` 内上下并列的兄弟，且 active 阶段
+  `viewArea` 为 `flex: 1 0 auto; min-height: auto`，`height: 100%` 没有
+  确定父高而塌陷。顶栏入口现在用独立的 `ViewTabShell` 包装：不透明的
+  绝对定位浮层（`position: absolute; inset: 0; z-index: 50;
+  overflow: hidden`），以 `position: relative` 的 `.an3WzG_body` 为
+  containing block 覆盖整个会话 body，盖住 composer；wrapper 有确定高度，
+  内部 `styles.root` 的 `height: 100%` 得以解析，网页聊天铺满。
+  header（含标签行）在 root 内是 body 之上的兄弟，不被浮层覆盖，用户仍可
+  点「对话」切回；左侧栏 / 全屏主面板入口仍用普通 `ChatPanelShell`。
+- **图2 红框：按用户确认「先不处理」**——「DSH认证失败修复」是
+  chat.deepseek.com 网页内部自带的会话标题胶囊，插件不注入 CSS/JS 去改
+  第三方网页，本次不做改动。
+- 工厂 id 仍为 `@tianyulinfeng1/dsh-plugin-deepseek-chat`（与
+  `package.json` 的 `name` 一致，v1.1.2 的 web boot 崩溃防护不复发）；
+  `inject` 仍为 `["slots"]`。
+
+### Verification
+
+- `node --check lib/client.js` 通过。
+- 离线自检 `node test/check-client.mjs` 全部通过（`RESULT: PASS`）：
+  四处槽位注册、设置默认值 / 类型校验 / 持久化 / 订阅通知、开关与自定义
+  标签名触发 `conversation.view` dispose+reinject、顶栏浮层
+  （`inset: 0` / `z-index: 50` / 不透明背景）、工厂 id 与包名一致、
+  Web 表层 inert、两入口共用固定分区、纯网页聊天无账号条、URL 白名单、
+  会话记忆、租约释放、弹窗白名单、崩溃隔离、反复开关、切走标签页释放租约。
+
+### Packaging
+
+- 版本 `1.1.4`，npm 包名保持 `@tianyulinfeng1/dsh-plugin-deepseek-chat` 不变；
+  GitHub / Gitee 安装路由不变。
+
+## 1.1.3 — 2026-11-11
+
+### 移除账号状态显示 + 新增会话顶栏标签页
+
+- **移除账号状态显示**：彻底删除面板顶部的账号状态条、DSH 账号探测
+  （`ctx.remote.account`）、5 秒轮询、账号同步 store 与相关文案 / 样式 /
+  状态订阅。面板现在是「纯网页聊天」，挂载即申请租约、立即启动，不再等待
+  任何异步账号流程。`exports.__test__` 中账号相关 API 全部移除。
+- **新增会话顶栏标签页**：通过官方 `conversation.view` 槽注册一个
+  「网页聊天」标签（`id: deepseek-chat-view`、`order: 100`、
+  `label: () => COPY.tab`），出现在「对话 / 轨迹 / 上下文 / 压缩 / 编队 / 统计」
+  这一行。它与左侧栏入口、全屏主面板**共用同一个 ChatPanelShell 组件**和
+  同一个固定分区 `panel:deepseek-chat`，因此登录态与会话记忆在两个入口间通用。
+- **保留左侧栏入口**：用户确认「两入口并存」——左侧栏图标 + 全屏主面板照旧，
+  顶栏另加标签页。
+- **注册健壮性**：原来 main 与 sidebar.panellist 两处 `ctx.slots.inject` 被
+  同一个 try/catch 包住，任一失败会连带另一个也不注册；现在三处注册
+  （main / sidebar.panellist / conversation.view）改为各自独立 try/catch。
+- 工厂 id 仍为 `@tianyulinfeng1/dsh-plugin-deepseek-chat`（与 `package.json`
+  的 `name` 一致，v1.1.2 的 web boot 崩溃防护不复发）；`inject` 仍为
+  `["slots"]`。
+
+### Verification
+
+- `node --check lib/client.js` 通过。
+- 离线自检 `node test/check-client.mjs` 全部通过（`RESULT: PASS`）：三处槽位
+  注册、工厂 id 与包名一致、Web 表层 inert、两入口共用组件与分区、纯网页聊天
+  无账号条、URL 白名单、会话记忆、租约释放、弹窗白名单、崩溃隔离、反复开关、
+  顶栏标签页切走释放租约。
+
+### Packaging
+
+- 版本 `1.1.3`，npm 包名保持 `@tianyulinfeng1/dsh-plugin-deepseek-chat` 不变；
+  GitHub / Gitee 安装路由不变。
+
 ## 1.1.2 — 2026-11-09
 
 ### ⚠️ 重点修复：web boot 崩溃（duplicate factory registration）

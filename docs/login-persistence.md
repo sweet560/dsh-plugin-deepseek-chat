@@ -178,7 +178,7 @@ DSH 自身的登录是 platform.deepseek.com 的 OAuth 授权（Host `deepseekAc
 
 **渲染层也拿不到 DSH token**：`globalThis.dshDesktop` 只暴露 `browser.acquire/release/onOpenRequested` 等，没有 `getAuthToken`、写 cookie、打开 Platform 取 token 的 API；`getAuthToken()` 只存在于桌面壳内嵌 Platform 页（`usage`/`top_up`）的专用 preload 且受主帧 + origin 限制。`browserAcquire` IPC 只按 workspace 分配分区/租约，`configureSession()` 不注入凭据。所以**纯插件无法免扫码**。
 
-**v1.1.1 起，本插件的账号状态条仅作展示**：读取 `ctx.remote.account.getState()` / `getProfile()` 显示昵称与登录状态，但**绝不参与 guest 分区或生命周期**。v1.1.0 曾把分区绑到账号状态，导致 `getState()` 瞬时失败就换分区、每次切回面板都要重新扫码——这是已修复的回归，不是「账号同步」的应有行为。
+**v1.1.3 起，本插件已彻底移除账号状态条、账号探测、轮询与同步 store**：面板为纯网页聊天，挂载即启动，不再有任何异步账号流程参与 guest 分区或生命周期。v1.1.0 曾把分区绑到账号状态，导致 `getState()` 瞬时失败就换分区、每次切回面板都要重新扫码——这是已修复的回归；v1.1.1 起账号状态条仅作展示，v1.1.3 起连展示也一并删除。
 
 本文的持久分区补丁负责「网页 cookie 不因**重启**丢失」；v1.1.1 的固定分区负责「网页 cookie 不因**切换面板**丢失」。两者都保留首次扫码后的网页会话，都不能把 DSH token 变成网页登录态。
 
