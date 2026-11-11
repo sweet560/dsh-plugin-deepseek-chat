@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: 安装 Gitee SSH 私钥
+      - name: 安装并校验 Gitee SSH 私钥
         env:
           GITEE_SSH_PRIVATE_KEY: ${{ secrets.GITEE_SSH_PRIVATE_KEY }}
         run: |
@@ -35,8 +35,42 @@ jobs:
             exit 1
           fi
           mkdir -p "$HOME/.ssh"
-          printf '%s\n' "$GITEE_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_rsa"
+
+          # 统一换行：还原可能存在的字面量 \n、去掉 Windows 的 CR、补齐结尾换行。
+          # 否则 ssh 会报 Load key ...: error in libcrypto
+          printf '%s' "$GITEE_SSH_PRIVATE_KEY" \
+            | sed 's/\\n/\n/g' \
+            | tr -d '\r' \
+            > "$HOME/.ssh/id_rsa"
+          printf '\n' >> "$HOME/.ssh/id_rsa"
           chmod 600 "$HOME/.ssh/id_rsa"
+
+          # 只诊断密钥「类型」，绝不打印密钥内容本身
+          first=$(head -n 1 "$HOME/.ssh/id_rsa")
+          echo "密钥首行类型：$(printf '%s' "$first" | awk '{print $1}')"
+          echo "密钥字节数：$(wc -c < "$HOME/.ssh/id_rsa")"
+          case "$first" in
+            "-----BEGIN OPENSSH PRIVATE KEY-----"*|"-----BEGIN RSA PRIVATE KEY-----"*|"-----BEGIN PRIVATE KEY-----"*|"-----BEGIN EC PRIVATE KEY-----"*)
+              echo "检测到 OpenSSH/PEM 格式私钥" ;;
+            ssh-ed25519*|ssh-rsa*|ecdsa-sha2-*)
+              echo "::error::Secret 里装的是「公钥」，不是私钥。请把 GITEE_SSH_PRIVATE_KEY 改成对应的私钥（以 -----BEGIN OPENSSH PRIVATE KEY----- 开头）。"
+              exit 1 ;;
+            "PuTTY-User-Key-File"*)
+              echo "::error::Secret 里是 PuTTY PPK 私钥，OpenSSH 读不了。请用 PuTTYgen 的 Conversions → Export OpenSSH key 导出后重新填入。"
+              exit 1 ;;
+            *)
+              if grep -q 'ENCRYPTED' "$HOME/.ssh/id_rsa"; then
+                echo "::error::私钥带口令（passphrase），CI 无法交互输入。请改用一把无口令的专用密钥。"
+                exit 1
+              fi
+              echo "::warning::密钥首行不是常见私钥格式，继续尝试加载以便给出确切错误。" ;;
+          esac
+
+          if ! ssh-keygen -y -f "$HOME/.ssh/id_rsa" > /dev/null; then
+            echo "::error::ssh-keygen 无法加载该私钥（常见原因：内容被截断、含多余字符、带口令）。请完整复制私钥重新填入 Secret。"
+            exit 1
+          fi
+          echo "私钥校验通过；推导出的公钥前缀：$(ssh-keygen -y -f "$HOME/.ssh/id_rsa" | awk '{print $1, substr($2,1,20)"..."}')"
 
       - name: 推送 main 与全部标签到 Gitee
         env:
