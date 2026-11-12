@@ -32,7 +32,7 @@ All notable changes to this project are documented here.
 - **Packaging**：版本 `1.1.7`；新增中文 `docs/RELEASE_NOTES_v1.1.7.md`
   并加入 `package.json` 的 `files` 列表。
 
-### CI 与文档（未发布，随 1.1.7 一并暂存）
+### CI 与文档（v1.1.7）
 
 - **设置页美化（v1.1.7）**：按「顶部标签栏 / 右边栏卡片 / 关于与检查更新」
   三个逻辑分组各包一张卡片，卡片用 `--dsw-alias-border-l3` 细边框、
@@ -60,6 +60,15 @@ All notable changes to this project are documented here.
   `push main` 与 `push tag` 触发两次时，两个运行排队；先跑的发布成功后，
   后跑的 `npm view` 会看到已发布而跳过，避免两个 `npm publish` 并发抢注
   不可变版本导致 `409 Conflict`（先跑者已发成功、非鉴权失败）。
+- **E409 幂等守卫加固（v1.1.7 发布后实测）**：按仓库串行实测生效
+  （两个 publish 运行排队、时间不重叠），但 npm 注册表有传播延迟——排在
+  后面的运行守卫单次 `npm view` 仍读到「未发布」，于是重复 publish 撞上良性
+  `E409`、CI 误报一个红叉（1.1.7 本身已由先跑的运行发布成功）。加固两点：
+  守卫改为 6 次轮询（间隔 5 秒）覆盖传播窗口；`npm publish` 步骤用
+  `PIPESTATUS` 捕获真实退出码，并对 `E409` / `409 Conflict` /
+  `previously staged version` 兜底，二次确认版本已可见后判成功，其他真实
+  失败（鉴权、网络）仍照常报错。此为发布后的 workflow 修正，不升版本、
+  不重建 tag/Release/npm tarball。
 
 ## 1.1.6 — 2026-11-11
 

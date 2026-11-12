@@ -13,8 +13,8 @@ permissions:
   id-token: write # 关键：启用 OIDC
 
 # 按「仓库」串行：同一 commit 被 push main 与 push tag 触发两次时，两个运行落入
-# 同一并发组排队。先跑的发布成功后，后跑的 npm view 会看到已发布而跳过，
-# 避免两个 npm publish 并发抢注不可变版本导致 409 Conflict（良性但会误报失败）。
+# 同一并发组排队。先跑的发布成功后，后跑的运行会跳过发布，避免两个
+# npm publish 并发抢注不可变版本导致 409 Conflict（良性但会误报失败）。
 concurrency:
   group: npm-publish-${{ github.repository }}
   cancel-in-progress: false
@@ -22,7 +22,6 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # environment: npm-更新 # 如果 npm 端也配置了环境名，确保一致；否则可以注释掉
     steps:
       - uses: actions/checkout@v7
 
@@ -46,15 +45,48 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "::notice::$NAME@$VERSION already on npm - skip."
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::$NAME@$VERSION not published yet - will publish."
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
-          fi
+          # npm 注册表有传播延迟：按仓库串行后，前一个运行刚发布成功时，
+          # 单次 npm view 可能仍读不到而误判「未发布」。轮询重试覆盖这个窗口。
+          for attempt in 1 2 3 4 5 6; do
+            if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+              echo "::notice::$NAME@$VERSION already on npm (check $attempt) - skip."
+              echo "should_publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            if [ "$attempt" -lt 6 ]; then sleep 5; fi
+          done
+          echo "::notice::$NAME@$VERSION not visible after 6 checks - will publish."
+          echo "should_publish=true" >> "$GITHUB_OUTPUT"
 
       - name: Publish to npm
         if: steps.version.outputs.should_publish == 'true'
-        run: npm publish --provenance --access public
-        # 关键：不要设置 NODE_AUTH_TOKEN 环境变量
+        shell: bash
+        run: |
+          # 关键：不要设置 NODE_AUTH_TOKEN 环境变量，认证走 OIDC。
+          # 兜底：即使守卫因注册表传播延迟漏判，publish 撞上「另一串行运行已发布」
+          # 的良性 E409 也不应让 CI 红叉——二次确认版本可见后视为成功。
+          set +e
+          npm publish --provenance --access public 2>&1 | tee "$RUNNER_TEMP/npm-publish.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::notice::npm publish succeeded."
+            exit 0
+          fi
+          if grep -qiE 'E409|409 Conflict|Cannot publish over previously staged version|previously published version' "$RUNNER_TEMP/npm-publish.log"; then
+            NAME=$(node -p "require('./package.json').name")
+            VERSION=$(node -p "require('./package.json').version")
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+              if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+                echo "::notice::$NAME@$VERSION already published by a parallel run (benign E409) - treating as success."
+                exit 0
+              fi
+              sleep 3
+            done
+            echo "::error::E409 but $NAME@$VERSION is still not visible on npm - failing."
+            cat "$RUNNER_TEMP/npm-publish.log"
+            exit "$code"
+          fi
+          echo "::error::npm publish failed (code=$code), not a benign E409."
+          cat "$RUNNER_TEMP/npm-publish.log"
+          exit "$code"
