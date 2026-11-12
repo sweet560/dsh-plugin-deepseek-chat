@@ -9,7 +9,7 @@
 | 项 | 要求 |
 |---|---|
 | DSH Desktop | `>= 0.2.2-rc.1`（含 `0.2.2-rc.1`） |
-| Node.js | `>= 20` |
+| Node.js | `>= 24`（Node 24 Active LTS） |
 | 平台 | Windows / macOS / Linux 桌面壳 |
 
 ## 版本更迭（1.1.2 → 1.1.5）

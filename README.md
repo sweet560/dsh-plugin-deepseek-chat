@@ -2,23 +2,30 @@
 
 [English](README.en.md) | 中文
 
-> **当前版本：v1.1.6** ｜适配 DSH **0.2.2-rc.1**
+> **当前版本：v1.1.7** ｜适配 DSH **0.2.2-rc.1**
 
-在 **DeepSeek Harness（DSH）桌面版**加入 **DeepSeek 聊天**：左侧栏图标入口、会话顶栏标签页（默认名「DeepSeek 聊天」，可在设置页开关 / 自定义），点开后 `chat.deepseek.com` 铺满会话区，记住上次所在的会话；提供**设置页面**（含插件基础信息与「检查更新」按钮），面板为**纯网页聊天**，不显示账号状态。
+在 **DeepSeek Harness（DSH）桌面版**加入 **DeepSeek 聊天**：左侧栏图标入口、会话顶栏标签页（默认名「DeepSeek 聊天」，可在设置页开关 / 自定义），以及通过 **dsh-better-sidebar**（若已安装）注册的**右边栏卡片**（默认名「DeepSeek 聊天」，独立开关 / 自定义），点开后 `chat.deepseek.com` 铺满会话区，记住上次所在的会话；提供**设置页面**（含插件基础信息与「检查更新」按钮），面板为**纯网页聊天**，不显示账号状态。
 
 > 仓库：[GitHub](https://github.com/sweet560/dsh-plugin-deepseek-chat) ｜ [Gitee 镜像](https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat)
 
 ![面板截图](docs/screenshot.png)
 
+![网页聊天界面（已登录）](docs/screenshot-chat.png)
+
+> 上图为 `chat.deepseek.com` 已登录后的新对话首页（「早上好，今天有什么计划？」），即插件内嵌网页的实际呈现；下图为插件在 DSH 桌面版里的面板位置。
+
 ## 功能
 
-- **两个入口并存**：
+- **三个入口并存**：
   - 左侧栏图标入口，排在「插件」和「自动化任务」之间，点开后占满主内容区；
-  - 会话顶栏标签行（「对话 / 轨迹 / 上下文 / 压缩 / 编队 / 统计」那一行）新增标签，通过官方 `conversation.view` 槽注册（`id: deepseek-chat-view`、`order: 100`），**默认显示名「DeepSeek 聊天」**。
-- **设置页面（v1.1.4）**：通过官方 `settings.section` 槽注册「DeepSeek 聊天」设置页（左侧「设置」弹窗导航里）。两项设置：
+  - 会话顶栏标签行（「对话 / 轨迹 / 上下文 / 压缩 / 编队 / 统计」那一行）新增标签，通过官方 `conversation.view` 槽注册（`id: deepseek-chat-view`、`order: 100`），**默认显示名「DeepSeek 聊天」**；
+  - **右边栏卡片（v1.1.7）**：若已安装 `dsh-better-sidebar`，通过其 `ctx.betterSidebar.registerTab` 注册一张右边栏 Tab（`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`、`order: 60`、单实例），**默认显示名「DeepSeek 聊天」**、直接复用网页聊天 webview。这是**软依赖**：没装 better-sidebar 时静默跳过、其余入口照常，无需改依赖或注入声明。
+- **设置页面（v1.1.4，v1.1.7 扩为四项）**：通过官方 `settings.section` 槽注册「DeepSeek 聊天」设置页（左侧「设置」弹窗导航里）。四项设置（顶栏标签与右边栏卡片彼此独立）：
   - **显示顶部标签栏**（默认开启）：关闭后移除顶栏标签，只保留左侧栏入口；
-  - **顶部标签栏名称**（默认 `DeepSeek 聊天`）：输入框默认**空白**，以灰色占位提示显示默认名；点进去不用删、直接输入新名字即可，留空自动恢复默认，最长 40 字。
-  - 配置存 `localStorage` 的 `dsh-plugin-deepseek-chat:config`，改完即时生效（标签行会重新注册）。
+  - **顶部标签栏名称**（默认 `DeepSeek 聊天`）：输入框默认**空白**，以灰色占位提示显示默认名；点进去不用删、直接输入新名字即可，留空自动恢复默认，最长 40 字；
+  - **显示右边栏卡片**（v1.1.7，默认开启）：关闭后注销 better-sidebar 的 Tab 注册；
+  - **右边栏卡片名称**（v1.1.7，默认 `DeepSeek 聊天`）：同样是灰色占位提示、留空恢复默认、最长 40 字；`title` 用 thunk，改名即时生效，与顶栏名称互不影响。
+  - 配置存 `localStorage` 的 `dsh-plugin-deepseek-chat:config`（`showTab` / `tabLabel` / `showCard` / `cardLabel` 四项），改完即时生效（标签行 / 卡片会注册或注销）。
 - **关于本插件（v1.1.5）**：设置页展示插件版本号、作者（`sweet560`）、功能简介、开源许可证（`MIT`），以及 npm 插件页面 / GitHub 仓库两个 `https` 外链（点开由桌面壳用系统浏览器打开）。
 - **检查更新（v1.1.5）**：设置页新增「检查更新」按钮，从 **npm 优先、GitHub 兜底** 两个公开 JSON 接口读取最新发布版本号（npm `dist-tags.latest`、`raw.githubusercontent.com` 上的 `package.json`），按数字逐段比较版本：已是最新 / 发现新版本 / 检查失败都给出文字状态，并附 npm / GitHub 跳转链接。检查中禁用重复点击，网络不可用或两源都失败都有兜底，不新增 Host 路由。
 - **图3 修复：网页铺满会话区（v1.1.4）**：选中顶栏标签时，网页现在撑满整个会话区、盖住 DSH 自己的对话消息与底部输入框；切回「对话」标签即恢复。顶栏入口用不透明绝对定位浮层（`inset: 0`、`z-index: 50`）覆盖会话 body，header 里的标签行仍在上方、随时可点回。
@@ -37,7 +44,11 @@
 
 > **v1.1.4**：新增设置页（开关顶部标签栏 + 自定义标签名，默认「DeepSeek 聊天」）；修复选中顶栏标签时网页没有铺满会话区、DSH 输入框仍露在下方的问题；图2 红框（网页内自带会话标题胶囊）经用户确认「先不处理」，插件不改动第三方网页。
 
-> **v1.1.5（本版）**：设置页新增「关于本插件」基础信息（版本号 / 作者 / 功能简介 / 许可证 / npm·GitHub 链接）与「检查更新」按钮（npm 优先、GitHub 兜底、语义版本比较、文字状态 + 跳转链接、失败兜底）；不改动 Host 半侧。
+> **v1.1.5**：设置页新增「关于本插件」基础信息（版本号 / 作者 / 功能简介 / 许可证 / npm·GitHub 链接）与「检查更新」按钮（npm 优先、GitHub 兜底、语义版本比较、文字状态 + 跳转链接、失败兜底）；不改动 Host 半侧。
+
+> **v1.1.6**：纯发布链路测试（OIDC 可信发布），功能与 1.1.5 相同。
+
+> **v1.1.7（本版）**：按 `dsh-better-sidebar` 原理新增右边栏卡片（软探测 `ctx.get('betterSidebar')` + `registerTab`、`title` thunk 即时改名、`ctx.effect` 持有 disposer），设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。
 
 ## 环境要求
 
@@ -116,8 +127,9 @@ dsh plugin --profile desktop add file:"<本仓库绝对路径>"
 - 本次 App 运行期间，切换面板/会话**不需要**重新登录（v1.1.1 起分区固定）。
 - **重启 DSH 后仍需要重新登录一次**：DSH 目前给内嵌浏览器的是随机内存分区（`dsh-sidebar-browser-<uuid>`，没有 `persist:` 前缀），进程退出即清空 cookie。本插件不修改 DSH 的安装文件；想做到「登录一次、长期免登录」，可按 **[docs/login-persistence.md](docs/login-persistence.md)** 做一次等长字节替换（含脚本、验证与回滚）。
 - 会话链接记在 App 的 localStorage（固定 key `dsh-plugin-deepseek-chat:last-url`），重启后仍会打开上次的会话（前提是已登录且该会话仍存在）。
-- 会话顶栏标签（默认 **「DeepSeek 聊天」**）与左侧栏图标是同一份网页聊天；切到别的标签时本插件的 guest 会被卸载并释放租约，切回来重新加载（分区不变，登录态与会话记忆保留）。
-- **设置页面**：打开 DSH「设置」弹窗 → 左侧导航「DeepSeek 聊天」，可勾选 / 取消「显示顶部标签栏」、修改「顶部标签栏名称」。名称输入框默认是空白的，只用灰色文字提示「DeepSeek 聊天」；点进输入框即可直接输入新名字，无需先删除默认文字。关闭标签栏后顶栏入口消失，但左侧栏图标仍可用；名字留空自动恢复默认「DeepSeek 聊天」。设置即时生效并保存在本机。
+- 会话顶栏标签（默认 **「DeepSeek 聊天」**）、左边栏图标与右边栏卡片是同一份网页聊天；切到别的标签时本插件的 guest 会被卸载并释放租约，切回来重新加载（分区不变，登录态与会话记忆保留）。
+- **设置页面**：打开 DSH「设置」弹窗 → 左侧导航「DeepSeek 聊天」，可分别勾选 / 取消「显示顶部标签栏」与「显示右边栏卡片」、分别修改「顶部标签栏名称」与「右边栏卡片名称」（互不影响）。两个名称输入框默认是空白的，只用灰色文字提示「DeepSeek 聊天」；点进输入框即可直接输入新名字，无需先删除默认文字。关闭标签栏后顶栏入口消失、关闭卡片后右边栏 Tab 被注销，但左侧栏图标始终可用；名字留空自动恢复默认「DeepSeek 聊天」。设置即时生效并保存在本机。
+- **右边栏卡片**：需已安装并启用 `dsh-better-sidebar`（本机即 0.30.1）。在「设置 → 侧边卡片 → ＋ 添加 Tab 插件」里能看到本插件注册的卡片；未安装 better-sidebar 时该卡片不出现，其它入口照常。卡片名称用 thunk，改名即时反映到卡片标题。
 - **关于与检查更新**：同页下方展示版本号、作者、功能简介、许可证与 npm / GitHub 链接；点「检查更新」会从 npm（失败则 GitHub）读取最新发布版本号。本地未发版的新版本会领先远端，显示「已是最新版本」；远端更高则显示「发现新版本 x.y.z」，结果下方附有跳转链接；网络不可用会显示失败原因。
 - 选中顶栏标签时网页铺满整个会话区，DSH 自己的对话消息与输入框被盖住；点回「对话」标签即恢复，不会丢失会话内容。
 
@@ -158,7 +170,8 @@ DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-
 
 | 版本 | 内容 |
 |---|---|
-| **1.1.6** | **OIDC 可信发布链路测试**：`.github/workflows/publish.yml` 启用 `permissions.id-token: write`、Node 22、`npm@latest`、`npm publish --provenance`，移除 `NODE_AUTH_TOKEN` 与 `environment` 声明；版本号升到 `1.1.6` 推送 GitHub，实测 GitHub Actions 能否经 npm Trusted Publisher 自动发布。功能与 1.1.5 相同，仅发布链路变更。 |
+| **1.1.7** | **新增右边栏卡片（dsh-better-sidebar）**：`ctx.get('betterSidebar')` 软探测 + `registerTab`（`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`、`order: 60`、复用网页聊天 webview），`title` thunk 即时改名、`ctx.effect` 持有 disposer；设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。离线自检全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。 |
+| **1.1.6** | **OIDC 可信发布链路测试**：`.github/workflows/publish.yml` 启用 `permissions.id-token: write`、Node 24（Active LTS）、`npm@latest`、`npm publish --provenance`，移除 `NODE_AUTH_TOKEN` 与 `environment` 声明；版本号升到 `1.1.6` 推送 GitHub，实测 GitHub Actions 能否经 npm Trusted Publisher 自动发布。功能与 1.1.5 相同，仅发布链路变更。 |
 | **1.1.5** | **设置页新增关于信息 + 检查更新**：新增插件版本号 / 作者 / 功能简介 / 许可证 / npm·GitHub 链接，以及「检查更新」按钮（npm `dist-tags` 优先、GitHub `raw` 兜底、数字逐段版本比较、文字状态 + 跳转链接、8 秒超时与失败兜底）；元信息常量与 `package.json` 一致性断言、离线自检全部通过（`RESULT: PASS`）。 |
 | **1.1.4** | **新增设置页 + 顶栏标签可配置 + 网页铺满会话区**：新增 `settings.section` 设置页（开关顶部标签栏、自定义标签名默认「DeepSeek 聊天」，localStorage 持久化、即时重注入刷新标签行）；顶栏标签用不透明绝对定位浮层铺满会话 body、盖住 composer 输入框；图2 网页内标题胶囊按用户确认不处理。四处槽位注册、离线自检全部通过（`RESULT: PASS`）。 |
 | **1.1.3** | **移除账号状态显示 + 新增会话顶栏标签页**：彻底删除账号状态条、账号探测、5 秒轮询、账号同步 store；新增 `conversation.view` 顶栏「网页聊天」标签（与左侧栏/全屏面板共用组件与固定分区）；三处槽位注册改为各自独立 try/catch。离线自检全部通过（`RESULT: PASS`）。 |
@@ -175,13 +188,13 @@ cd dsh-plugin-deepseek-chat
 node test/check-client.mjs
 ```
 
-`test/check-client.mjs` 是离线自检：在 `node:vm` 里加载 `lib/client.js`，用假的 React/DOM/租约桥验证四处槽位注册（左侧栏 / 全屏主面板 / 顶栏标签页 / 设置页）、配置层（默认值、类型校验、持久化、订阅通知、动态重注入）、顶栏浮层的铺满样式、工厂 id 与包名一致、Web 表层 inert、两入口共用固定分区、纯网页聊天无账号条、URL 白名单、会话记忆、租约释放、弹窗白名单和崩溃隔离；并用 mock fetch 验证基础信息常量与 `package.json` 一致、语义版本比较、更新载荷解析、npm/GitHub 兜底、检查更新各状态分支与设置页点击联动。
+`test/check-client.mjs` 是离线自检：在 `node:vm` 里加载 `lib/client.js`，用假的 React/DOM/租约桥验证四处槽位注册（左侧栏 / 全屏主面板 / 顶栏标签页 / 设置页）、**better-sidebar 软探测**（未装时静默跳过、已装时注册一张右边栏卡片、title thunk 改名、开关注销/重注册、effect cleanup 注销）、配置层（四项默认值、类型校验、持久化、订阅通知、动态重注入）、顶栏浮层的铺满样式、工厂 id 与包名一致、Web 表层 inert、两入口共用固定分区、纯网页聊天无账号条、URL 白名单、会话记忆、租约释放、弹窗白名单和崩溃隔离；并用 mock fetch 验证基础信息常量与 `package.json` 一致、语义版本比较、更新载荷解析、npm/GitHub 兜底、检查更新各状态分支与设置页点击联动。
 
 目录：
 
 ```
 lib/index.js           宿主半侧（空实现，只为让 client bundle 有 Loader 入口）
-lib/client.js          浏览器半侧：入口、网页聊天面板、顶栏铺满浮层、设置页与配置层、关于信息/检查更新、webview 生命周期、崩溃隔离
+lib/client.js          浏览器半侧：入口、网页聊天面板、顶栏铺满浮层、右边栏卡片（better-sidebar 软探测）、设置页与配置层、关于信息/检查更新、webview 生命周期、崩溃隔离
 cordis.patch.yml       bundle 补丁：插入本插件的 Loader 行
 locale/zh.json         插件页显示名称/描述（中文）
 locale/en.json         插件页显示名称/描述（英文）

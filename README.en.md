@@ -2,23 +2,30 @@
 
 English | [中文](README.md)
 
-> **Current version: v1.1.6** | Targets DSH **0.2.2-rc.1**
+> **Current version: v1.1.7** | Targets DSH **0.2.2-rc.1**
 
-Adds **DeepSeek Chat** to the **DeepSeek Harness (DSH) desktop**: a sidebar icon entry and a conversation-header tab (default name **DeepSeek Chat**, configurable). Clicking either opens `chat.deepseek.com` filling the conversation area and remembers the last conversation. A **settings page** (with plugin metadata and a "Check for updates" button) lets you show/hide the header tab and rename it. The panel is **pure web chat** — no account status strip.
+Adds **DeepSeek Chat** to the **DeepSeek Harness (DSH) desktop**: a sidebar icon entry, a conversation-header tab (default name **DeepSeek Chat**, configurable), and an optional **right-sidebar card** registered through `dsh-better-sidebar` when installed (default name **DeepSeek Chat**, independently configurable). Clicking any of them opens `chat.deepseek.com` filling the conversation area and remembers the last conversation. A **settings page** (with plugin metadata and a "Check for updates" button) lets you show/hide each surface and rename them. The panel is **pure web chat** — no account status strip.
 
 > Repository: [GitHub](https://github.com/sweet560/dsh-plugin-deepseek-chat) | [Gitee mirror](https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat)
 
 ![panel screenshot](docs/screenshot.png)
 
+![Chat page (signed in)](docs/screenshot-chat.png)
+
+> The image above is the signed-in `chat.deepseek.com` new-chat home ("早上好，今天有什么计划？") as rendered inside the plugin's embedded webview; the image below shows where the panel sits in the DSH desktop app.
+
 ## Features
 
-- **Two entries coexist**:
+- **Three entries coexist**:
   - A sidebar icon, placed between **Plugins** and **Scheduled tasks**, opening the full main area;
-  - A tab in the conversation-header tab row ("Dialogue / Trajectory / Context / Compression / Team / Stats"), registered through the official `conversation.view` slot (`id: deepseek-chat-view`, `order: 100`), **default label "DeepSeek Chat"**.
-- **Settings page (v1.1.4)**: registered through the official `settings.section` slot (a "DeepSeek Chat" page in the Settings dialog). Two settings:
+  - A tab in the conversation-header tab row ("Dialogue / Trajectory / Context / Compression / Team / Stats"), registered through the official `conversation.view` slot (`id: deepseek-chat-view`, `order: 100`), **default label "DeepSeek Chat"**;
+  - **Right-sidebar card (v1.1.7)**: when `dsh-better-sidebar` is installed, a right-sidebar Tab is registered through `ctx.betterSidebar.registerTab` (`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`, `order: 60`, single instance), **default label "DeepSeek Chat"**, reusing the web-chat webview. This is a **soft dependency**: with better-sidebar absent it is silently skipped and the other entries still work — no dependency or inject declaration changes.
+- **Settings page (v1.1.4, extended to four settings in v1.1.7)**: registered through the official `settings.section` slot (a "DeepSeek Chat" page in the Settings dialog). Four settings (header tab and right-sidebar card are independent):
   - **Show header tab** (default on): turning it off removes the header tab, leaving only the sidebar entry;
-  - **Header tab name** (default `DeepSeek Chat`): the field is **empty by default** and shows the default name only as a grey placeholder; click into it and type a new name directly (no need to delete the default text first). Empty falls back to the default, capped at 40 characters.
-  - Settings are persisted in `localStorage` under `dsh-plugin-deepseek-chat:config` and take effect immediately (the tab row re-registers).
+  - **Header tab name** (default `DeepSeek Chat`): the field is **empty by default** and shows the default name only as a grey placeholder; click into it and type a new name directly (no need to delete the default text first). Empty falls back to the default, capped at 40 characters;
+  - **Show right-sidebar card** (v1.1.7, default on): turning it off unregisters the better-sidebar Tab;
+  - **Right-sidebar card name** (v1.1.7, default `DeepSeek Chat`): same grey-placeholder behaviour, empty restores the default, capped at 40 characters; `title` is a thunk so renaming takes effect immediately, independent of the header tab name.
+  - Settings are persisted in `localStorage` under `dsh-plugin-deepseek-chat:config` (`showTab` / `tabLabel` / `showCard` / `cardLabel`) and take effect immediately (tab row / card are registered or unregistered).
 - **About this plugin (v1.1.5)**: the Settings page shows the plugin version, author (`sweet560`), a short description, the open-source license (`MIT`), and two `https` links to the npm package page and the GitHub repository (opened by the desktop shell in the system browser).
 - **Check for updates (v1.1.5)**: the Settings page adds a "Check for updates" button that reads the latest published version from two public JSON endpoints — **npm first, GitHub as a fallback** (npm `dist-tags.latest`, `raw.githubusercontent.com` `package.json`). Versions are compared segment-by-segment numerically: up to date / new version available / check failed all produce a text status with npm/GitHub jump links. Repeated clicks are ignored while checking; network failures and both-source failures are handled gracefully. No Host route is added.
 - **Fills the conversation area (v1.1.4)**: while the header tab is selected, the web chat now fills the whole conversation area and covers DSH's own message list and bottom composer. Switching back to "Dialogue" restores them. The header entry uses an opaque absolutely-positioned overlay (`inset: 0`, `z-index: 50`) over the conversation body; the tab row in the header stays above it and remains clickable.
@@ -37,7 +44,11 @@ Adds **DeepSeek Chat** to the **DeepSeek Harness (DSH) desktop**: a sidebar icon
 
 > **v1.1.4**: adds a settings page (show/hide the header tab + a custom tab name, default "DeepSeek Chat"); fixes the header tab not filling the conversation area (DSH's composer was still visible below the web chat). The red-boxed title chip in the user's second screenshot is a chat.deepseek.com page element; per the user's confirmation it is left untouched — the plugin does not modify the third-party page.
 
-> **v1.1.5 (this release)**: adds an About block to Settings (version / author / description / license / npm & GitHub links) and a "Check for updates" button (npm first, GitHub fallback, numeric semver comparison, text status + jump links, timeout and failure fallback). The empty Host half is untouched.
+> **v1.1.5**: adds an About block to Settings (version / author / description / license / npm & GitHub links) and a "Check for updates" button (npm first, GitHub fallback, numeric semver comparison, text status + jump links, timeout and failure fallback). The empty Host half is untouched.
+
+> **v1.1.6**: a pure OIDC trusted-publishing pipeline test; same features as v1.1.5.
+
+> **v1.1.7 (this release)**: adds a right-sidebar card following the `dsh-better-sidebar` model (soft `ctx.get('betterSidebar')` probe + `registerTab`, thunk `title` for instant renaming, disposer held by `ctx.effect`), plus a "Show right-sidebar card" switch and a "Right-sidebar card name" field in Settings (default "DeepSeek Chat", independent of the header tab). Zero new dependencies and no inject-declaration changes. See [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md).
 
 ## Requirements
 
@@ -116,8 +127,9 @@ dsh plugin --profile desktop add file:"<absolute path to this repository>"
 - Within one app run, switching panels or sessions keeps you signed in (fixed partition since v1.1.1).
 - **Sign in again after restarting DSH**: DSH currently gives embedded browsers a random in-memory partition (`dsh-sidebar-browser-<uuid>`, no `persist:` prefix), so cookies are dropped when the process exits. This plugin does not modify DSH's installation files; to sign in once and stay signed in, apply the equal-length byte patch described in **[docs/login-persistence.md](docs/login-persistence.md)**.
 - The conversation URL is stored under the fixed key `dsh-plugin-deepseek-chat:last-url`, so the last conversation is restored after a restart (while signed in and while it still exists).
-- The header tab (default **"DeepSeek Chat"**) and the sidebar icon are the same web chat; switching to another tab unmounts this plugin's guest and releases the lease, and switching back reloads it (same partition, login state and conversation memory preserved).
-- **Settings page**: open the DSH **Settings** dialog → "DeepSeek Chat" in the left navigation. Toggle **Show header tab** and edit **Header tab name**. The name field is empty by default, showing "DeepSeek Chat" only as a grey placeholder; click into it and type directly without deleting any default text. Turning the tab off removes the header entry but keeps the sidebar icon; leaving the name empty restores the default "DeepSeek Chat". Settings apply immediately and are stored locally.
+- The header tab (default **"DeepSeek Chat"**), the sidebar icon and the right-sidebar card are the same web chat; switching to another tab unmounts this plugin's guest and releases the lease, and switching back reloads it (same partition, login state and conversation memory preserved).
+- **Settings page**: open the DSH **Settings** dialog → "DeepSeek Chat" in the left navigation. Independently toggle **Show header tab** / **Show right-sidebar card** and edit **Header tab name** / **Right-sidebar card name**. Both name fields are empty by default, showing "DeepSeek Chat" only as a grey placeholder; click into one and type directly without deleting any default text. Turning a surface off removes its entry but keeps the sidebar icon; leaving a name empty restores the default "DeepSeek Chat". Settings apply immediately and are stored locally.
+- **Right-sidebar card**: requires `dsh-better-sidebar` installed and enabled (0.30.1 on this machine). It appears under Settings → Side cards → "+ Add Tab plugin". With better-sidebar absent the card is not shown and the other entries still work. Its name is a thunk, so renaming updates the card title immediately.
 - While the header tab is selected the web chat fills the conversation area and covers DSH's own messages/composer; clicking back to "Dialogue" restores them without losing conversation content.
 
 ## Persistent login (optional)
@@ -150,7 +162,8 @@ The current implementation guards every guest call behind an `isConnected` check
 
 | Version | Changes |
 |---|---|
-| **1.1.6** | **OIDC trusted-publishing pipeline test**: `.github/workflows/publish.yml` now enables `permissions.id-token: write`, Node 22, `npm@latest`, `npm publish --provenance`, and removes `NODE_AUTH_TOKEN` and the `environment` declaration. Version bumped to `1.1.6` and pushed to GitHub to test whether GitHub Actions can publish via npm Trusted Publisher. No functional change from 1.1.5. |
+| **1.1.7** | **Adds a right-sidebar card (dsh-better-sidebar)**: soft `ctx.get('betterSidebar')` probe + `registerTab` (`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`, `order: 60`, single instance, reuses the web-chat webview), thunk `title` for instant renaming, disposer held by `ctx.effect`; Settings gains a "Show right-sidebar card" switch and a "Right-sidebar card name" field (default "DeepSeek Chat", independent of the header tab). Zero new dependencies, no inject-declaration changes. Offline self-check passes fully (`RESULT: PASS`). See [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md). |
+| **1.1.6** | **OIDC trusted-publishing pipeline test**: `.github/workflows/publish.yml` now enables `permissions.id-token: write`, Node 24 (Active LTS), `npm@latest`, `npm publish --provenance`, and removes `NODE_AUTH_TOKEN` and the `environment` declaration. Version bumped to `1.1.6` and pushed to GitHub to test whether GitHub Actions can publish via npm Trusted Publisher. No functional change from 1.1.5. |
 | **1.1.5** | **Adds About info + Check for updates to Settings**: plugin version / author / description / license / npm & GitHub links, plus a "Check for updates" button (npm `dist-tags` first, GitHub `raw` fallback, numeric segment-by-segment version comparison, text status + jump links, 8-second timeout and failure fallbacks). Metadata constants are asserted equal to `package.json`; offline self-check passes fully (`RESULT: PASS`). |
 | **1.1.4** | **Adds a settings page + makes the header tab configurable + fills the conversation area**: a `settings.section` page (show/hide header tab, custom tab name default "DeepSeek Chat", localStorage persistence, immediate re-registration for the tab row); the header entry uses an opaque absolute overlay to fill the conversation body and cover the composer. The red-boxed in-page title chip is left untouched per user confirmation. Four slot registrations, offline self-check passes fully (`RESULT: PASS`). |
 | **1.1.3** | **Removes the account status display + adds a conversation-header tab**: deletes the account status strip, probe, 5-second polling and account-sync store; adds a `conversation.view` "Web Chat" header tab sharing the component and fixed partition with the sidebar/full-area entries; three slot registrations now use independent try/catch blocks. Offline self-check passes fully (`RESULT: PASS`). |
@@ -167,11 +180,11 @@ cd dsh-plugin-deepseek-chat
 node test/check-client.mjs
 ```
 
-`test/check-client.mjs` loads `lib/client.js` in a `node:vm` sandbox with fake React/DOM/bridge objects and checks four slot registrations (sidebar / full-area panel / header tab / settings page), the config layer (defaults, type validation, persistence, subscription, dynamic re-injection), the header overlay's fill styling, factory id equals package name, Web-surface inertness, shared fixed partition across both entries, pure web chat with no account strip, URL allowlisting, conversation memory, lease release, popup allowlisting and crash containment; a mock fetch verifies metadata constants against `package.json`, semver comparison, update-payload parsing, npm/GitHub fallback, all update-state branches, and the Settings-page click flow.
+`test/check-client.mjs` loads `lib/client.js` in a `node:vm` sandbox with fake React/DOM/bridge objects and checks four slot registrations (sidebar / full-area panel / header tab / settings page), the **better-sidebar soft probe** (absent → silent skip; present → one card registered, thunk renaming, switch unregister/re-register, effect cleanup unregistration), the config layer (four settings: defaults, type validation, persistence, subscription, dynamic re-injection), the header overlay's fill styling, factory id equals package name, Web-surface inertness, shared fixed partition across both entries, pure web chat with no account strip, URL allowlisting, conversation memory, lease release, popup allowlisting and crash containment; a mock fetch verifies metadata constants against `package.json`, semver comparison, update-payload parsing, npm/GitHub fallback, all update-state branches, and the Settings-page click flow.
 
 ```
 lib/index.js           host half (empty; it only gives the client bundle a Loader entry)
-lib/client.js          browser half: entries, web-chat panel, full-area header overlay, settings page + config layer, about info / check-for-updates, webview lifecycle, crash containment
+lib/client.js          browser half: entries, web-chat panel, full-area header overlay, right-sidebar card (better-sidebar soft probe), settings page + config layer, about info / check-for-updates, webview lifecycle, crash containment
 cordis.patch.yml       bundle patch that inserts this plugin's Loader row
 locale/{zh,en}.json    Plugins-page title/description
 icon.svg               Plugins-page icon

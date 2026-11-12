@@ -12,8 +12,11 @@ permissions:
   contents: read
   id-token: write # 关键：启用 OIDC
 
+# 按「仓库」串行：同一 commit 被 push main 与 push tag 触发两次时，两个运行落入
+# 同一并发组排队。先跑的发布成功后，后跑的 npm view 会看到已发布而跳过，
+# 避免两个 npm publish 并发抢注不可变版本导致 409 Conflict（良性但会误报失败）。
 concurrency:
-  group: npm-publish-${{ github.ref }}
+  group: npm-publish-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -21,12 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     # environment: npm-更新 # 如果 npm 端也配置了环境名，确保一致；否则可以注释掉
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22 # 关键：满足 ≥ 22.14.0
-          registry-url: 'https://registry.npmjs.org'
+          node-version: 24 # Node 24（Active LTS），满足 OIDC 可信发布的最低要求
+          # OIDC 模式不需要 registry-url：npm 默认 registry 就是 npmjs.org；
+          # 删掉可避免 setup-node 写出无效的 always-auth 与 NODE_AUTH_TOKEN 占位符
 
       - name: Upgrade npm
         run: npm install -g npm@latest # 关键：确保 npm ≥ 11.5.1

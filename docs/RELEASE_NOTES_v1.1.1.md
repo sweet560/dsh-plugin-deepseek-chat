@@ -3,7 +3,7 @@
 **DeepSeek Chat panel for DeepSeek Harness Desktop — stable login session, DSH account status, and full ASAR integrity support for the restart-free login patch.**
 
 - Requires DSH Desktop **0.2.2-rc.1** or newer.
-- Requires Node >= 20.
+- Requires Node >= 24 (Node 24 Active LTS).
 
 ## What's fixed
 

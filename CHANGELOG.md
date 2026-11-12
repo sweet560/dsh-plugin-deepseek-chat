@@ -2,12 +2,71 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.7 — 2026-11-12
+
+### 新增右边栏卡片（dsh-better-sidebar）与设置页开关/命名
+
+- **最简便配置：软依赖、零新增依赖**。不改 `package.json` 的
+  `dsh.client.inject`（那是 client module 图加载顺序，不是服务声明）、
+  不改 `exports.inject`（仍 `["slots"]`）、不 value-import 任何外部包。
+  运行时用宿主 guard 允许的 `ctx.get("betterSidebar")` 软探测：
+  装了 dsh-better-sidebar 就注册，没装则静默跳过，左侧栏 / 顶栏 / 设置页照常。
+- **`registerTab` 一张右边栏卡片**：`CardView` 直接复用 `ChatPanelShell`
+  （内嵌 chat.deepseek.com webview、走同一 guest 租约与固定持久分区），
+  `id = "@tianyulinfeng1/dsh-plugin-deepseek-chat:card"`（包前缀避免冲突，
+  `order: 60`、`single: true`、`dedupeKey` 返回同一 id），`icon` 复用 `ChatGlyph`。
+  `title: () => cardLabel()` 用 thunk——dsh-better-sidebar 每次渲染都重新求值，
+  改名即时生效、无需重新注册。
+- **开关与生命周期**：`showCard` 关 → dispose 旧 `registerTab`；开 → 重新注册；
+  disposer 由 `ctx.effect` 持有，插件卸载（HMR / 禁用）时注销，
+  不留孤儿 TabDescriptor、下次激活不会抛 `already registered`。
+- **设置页新增两项**（与顶栏标签栏的开关/名称彼此独立）：
+  「显示右边栏卡片」复选框、「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，
+  灰色占位提示、留空恢复默认）。`DEFAULTS` / `readConfig` / `writeConfig` 由
+  两项扩为四项（`showTab` / `tabLabel` / `showCard` / `cardLabel`），
+  归一化抽成 `normalizeLabel(value, fallback)`。
+- **Verification**：`node --check lib/client.js` 通过；`npm test` 全部通过
+  （新增 better-sidebar 软探测缺席/在位、descriptor 字段、title thunk 改名、
+  开关注销/重注册、effect cleanup 等断言；元信息版本号随 `package.json`
+  同步到 `1.1.7`）。
+- **Packaging**：版本 `1.1.7`；新增中文 `docs/RELEASE_NOTES_v1.1.7.md`
+  并加入 `package.json` 的 `files` 列表。
+
+### CI 与文档（未发布，随 1.1.7 一并暂存）
+
+- **设置页美化（v1.1.7）**：按「顶部标签栏 / 右边栏卡片 / 关于与检查更新」
+  三个逻辑分组各包一张卡片，卡片用 `--dsw-alias-border-l3` 细边框、
+  `--dsw-radius-sm` 圆角与 `--dsw-alias-bg-layer-1` 浅底；输入框、按钮、
+  状态行改用 `--dsw-alias-bg-base` / `--dsw-alias-bg-layer-2` 拉开层次。
+  全部沿用 DSH 主题别名令牌，明暗主题自动适配，不写死任何颜色。
+- **设置页对齐微调（v1.1.7）**：卡片上留白增大让「关于本插件」标题不再紧贴边框；
+  基础信息 5 行改用严格两栏网格（标签列固定 88px、值列自适应、baseline 首行对齐、
+  每行等距 5px），标签不换行——多行「功能简介」不再把整列挤得参差不齐。
+- **README 插图**：在面板截图下方新增已登录的网页聊天界面截图
+  `docs/screenshot-chat.png`（图1），并加入 `package.json` 的 `files`。
+- **CI 全面升到 Node 24（Active LTS）**：`.github/workflows/test.yml`
+  矩阵改为 `[24]`、`publish.yml` 的 `node-version` 改为 `24`；
+  `checkout` / `setup-node` 由 `@v4` 升到 `@v7`（v7 的 Action 自身运行时为
+  `node24`，消除 GitHub「Node.js 20 已弃用、被强制在 Node.js 24 运行」的警告）。
+  `engines.node` 改为 `>=24`，
+  README 中英、CHANGELOG、各版本发布说明里的旧 Node 版本字样统一为 24。
+- **删除 setup-node 的无效输入**：`publish.yml` 去掉 `registry-url`
+  （OIDC 模式不需要，且会写出无效的 `always-auth` 与
+  `NODE_AUTH_TOKEN: XXXXX` 占位符并触发 `npm warn Unknown user config "always-auth"`）。
+  npm 默认 registry 仍是 npmjs.org，OIDC 走 `id-token: write` 不受影响。
+- **消除良性 E409 并发抢注**：`publish.yml` 的 `concurrency.group` 由
+  `npm-publish-${{ github.ref }}`（按 ref 分组）改为
+  `npm-publish-${{ github.repository }}`（按仓库串行）。同一 commit 被
+  `push main` 与 `push tag` 触发两次时，两个运行排队；先跑的发布成功后，
+  后跑的 `npm view` 会看到已发布而跳过，避免两个 `npm publish` 并发抢注
+  不可变版本导致 `409 Conflict`（先跑者已发成功、非鉴权失败）。
+
 ## 1.1.6 — 2026-11-11
 
 ### OIDC 可信发布（Trusted Publishing）链路测试
 
 - **`.github/workflows/publish.yml` 改为 OIDC 模式**：新增
-  `permissions.id-token: write`（OIDC 必需）、`node-version: 22`（≥ 22.14.0）、
+  `permissions.id-token: write`（OIDC 必需）、`node-version: 24`（Node 24 Active LTS）、
   `npm install -g npm@latest`（npm CLI ≥ 11.5.1）、
   `npm publish --provenance --access public`；删除 `NODE_AUTH_TOKEN` 环境变量、
   `environment: npm-更新` 声明与 `NPM_TOKEN` 校验步骤；保留

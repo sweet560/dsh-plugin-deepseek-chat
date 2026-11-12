@@ -1,15 +1,18 @@
-// dsh-plugin-deepseek-chat 客户端包离线自检（v1.1.4）。
+// dsh-plugin-deepseek-chat 客户端包离线自检（v1.1.7）。
 //
 // 这个包是浏览器 ModuleLoader 脚本，因此自检：
 //   1. 在 vm 里执行它，捕获 __ModuleLoader__.load 的注册；
 //   2. 用桩化的 react / DOM / localStorage 实例化 factory；
-//   3. 验证配置层（设置项默认值、类型校验、持久化、订阅通知）；
+//   3. 验证配置层（四项设置：开关/名称 × 顶栏标签与右边栏卡片，默认值、类型校验、持久化、订阅通知）；
 //   4. 在「Web 表层」（无桌面桥，应完全不注册）与「桌面表层」分别执行 apply()；
 //   5. 校验四处槽位注册（左侧栏图标 / 全屏主面板 / 会话顶栏标签页 / 设置页）；
-//   6. 验证设置页开关与自定义标签名能动态重注入顶栏标签页（标签行只在注册表变化时重算）；
-//   7. 验证顶栏标签页是「铺满浮层」（盖住会话输入框）；
-//   8. 迷你渲染面板，跑完 webview 租约、会话记忆、崩溃隔离、弹窗白名单等全流程，
-//      并断言面板里不再有账号状态条。
+//   6. 验证 better-sidebar 软探测：未安装时静默跳过，已安装时注册一张右边栏卡片
+//      （title thunk 即时改名、showCard 开关注销/重注册、effect cleanup 清理）；
+//   7. 验证设置页两对开关与自定义名称能动态重注入顶栏标签页（标签行只在注册表变化时重算）；
+//   8. 验证顶栏标签页是「铺满浮层」（盖住会话输入框）；
+//   9. 迷你渲染面板，跑完 webview 租约、会话记忆、崩溃隔离、弹窗白名单等全流程，
+//      并断言面板里不再有账号状态条；
+//  10. 关于信息 + 检查更新（npm 优先 / GitHub 兜底、语义版本、状态与跳转链接）。
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
@@ -342,33 +345,44 @@ if (api === undefined) {
 {
   const CONFIG_KEY = api.CONFIG_KEY;
   if (CONFIG_KEY !== "dsh-plugin-deepseek-chat:config") fail(`CONFIG_KEY 不对：${CONFIG_KEY}`);
-  if (api.DEFAULTS?.showTab !== true || api.DEFAULTS?.tabLabel !== "DeepSeek 聊天") fail(`默认值不对：${JSON.stringify(api.DEFAULTS)}`);
-  else ok("设置默认值：showTab=true / tabLabel=DeepSeek 聊天");
+  if (api.DEFAULTS?.showTab !== true || api.DEFAULTS?.tabLabel !== "DeepSeek 聊天" ||
+      api.DEFAULTS?.showCard !== true || api.DEFAULTS?.cardLabel !== "DeepSeek 聊天") {
+    fail(`默认值不对：${JSON.stringify(api.DEFAULTS)}`);
+  } else ok("设置默认值：showTab / tabLabel / showCard / cardLabel 四项齐全");
 
-  if (api.normalizeTabLabel("   ") !== "DeepSeek 聊天") fail("空白标签名没有回退默认");
-  if (api.normalizeTabLabel("  X  ") !== "X") fail("标签名没有去首尾空格");
-  if (api.normalizeTabLabel("x".repeat(50)).length !== 40) fail("超长标签名没有截断到 40");
-  ok("标签名归一化：去空白、空回退默认、超长截断");
+  if (api.normalizeTabLabel("   ") !== "DeepSeek 聊天" || api.normalizeLabel("   ", "DeepSeek 聊天") !== "DeepSeek 聊天") fail("空白名称没有回退默认");
+  if (api.normalizeTabLabel("  X  ") !== "X") fail("名称没有去首尾空格");
+  if (api.normalizeTabLabel("x".repeat(50)).length !== 40) fail("超长名称没有截断到 40");
+  if (api.normalizeLabel("   ", "备用") !== "备用") fail("normalizeLabel 没用传入的 fallback");
+  ok("名称归一化：去空白、空回退默认、超长截断、可指定 fallback");
 
   storage.clear();
-  storage.set(CONFIG_KEY, JSON.stringify({ showTab: "yes", tabLabel: 123 }));
+  storage.set(CONFIG_KEY, JSON.stringify({ showTab: "yes", tabLabel: 123, showCard: 1, cardLabel: {} }));
   let c = api.readConfig();
-  if (c.showTab !== true || c.tabLabel !== "DeepSeek 聊天") fail(`错误类型没有回退默认：${JSON.stringify(c)}`);
+  if (c.showTab !== true || c.tabLabel !== "DeepSeek 聊天" || c.showCard !== true || c.cardLabel !== "DeepSeek 聊天") {
+    fail(`错误类型没有回退默认：${JSON.stringify(c)}`);
+  }
   storage.set(CONFIG_KEY, "{not json");
   c = api.readConfig();
   if (c.showTab !== true || c.tabLabel !== "DeepSeek 聊天") fail("损坏的 JSON 没有回退默认");
-  storage.set(CONFIG_KEY, JSON.stringify({ showTab: false, tabLabel: "  X  " }));
+  storage.set(CONFIG_KEY, JSON.stringify({ showTab: false, tabLabel: "  X  ", showCard: false, cardLabel: "  卡片  " }));
   c = api.readConfig();
-  if (c.showTab !== false || c.tabLabel !== "X") fail(`合法配置读取不对：${JSON.stringify(c)}`);
-  ok("readConfig 按类型校验字段，损坏/错误类型回退默认");
+  if (c.showTab !== false || c.tabLabel !== "X" || c.showCard !== false || c.cardLabel !== "卡片") {
+    fail(`合法配置读取不对：${JSON.stringify(c)}`);
+  }
+  ok("readConfig 按类型校验四项字段，损坏/错误类型回退默认");
 
   let received;
   const unsubscribe = api.subscribeConfig((next) => { received = next; });
-  api.writeConfig({ showTab: false, tabLabel: "自定义" });
-  if (received?.showTab !== false || received?.tabLabel !== "自定义") fail("writeConfig 没有通知订阅者");
-  if (api.getConfig().showTab !== false || api.tabLabel() !== "自定义") fail("writeConfig 没有更新内存配置");
-  if (storage.get(CONFIG_KEY) !== JSON.stringify({ showTab: false, tabLabel: "自定义" })) fail("writeConfig 没有持久化到 localStorage");
-  else ok("writeConfig 合并 patch、持久化并通知订阅者");
+  api.writeConfig({ showTab: false, tabLabel: "自定义", showCard: false, cardLabel: "我的卡片" });
+  if (received?.showTab !== false || received?.tabLabel !== "自定义" || received?.showCard !== false || received?.cardLabel !== "我的卡片") {
+    fail("writeConfig 没有通知订阅者（四项）");
+  }
+  if (api.getConfig().showTab !== false || api.tabLabel() !== "自定义" || api.cardLabel() !== "我的卡片") fail("writeConfig 没有更新内存配置");
+  const persisted = JSON.parse(storage.get(CONFIG_KEY) ?? "{}");
+  if (persisted.showTab !== false || persisted.tabLabel !== "自定义" || persisted.showCard !== false || persisted.cardLabel !== "我的卡片") {
+    fail("writeConfig 没有持久化四项到 localStorage");
+  } else ok("writeConfig 合并 patch、持久化四项并通知订阅者");
   unsubscribe();
   received = void 0;
   api.writeConfig({ tabLabel: "再次" });
@@ -376,13 +390,14 @@ if (api === undefined) {
   else ok("subscribeConfig 返回的 disposer 能取消订阅");
 
   // 恢复模块级默认配置，避免影响后续注册测试；并清掉测试写入的 config 键。
-  api.writeConfig({ showTab: true, tabLabel: "DeepSeek 聊天" });
+  api.writeConfig({ showTab: true, tabLabel: "DeepSeek 聊天", showCard: true, cardLabel: "DeepSeek 聊天" });
   storage.clear();
-  if (api.getConfig().showTab !== true || api.tabLabel() !== "DeepSeek 聊天") fail("测试后配置没有恢复默认");
-  else ok("配置层测试结束，已恢复默认配置");
+  if (api.getConfig().showTab !== true || api.tabLabel() !== "DeepSeek 聊天" || api.getConfig().showCard !== true || api.cardLabel() !== "DeepSeek 聊天") {
+    fail("测试后配置没有恢复默认");
+  } else ok("配置层测试结束，已恢复默认配置");
 }
 
-// ── 关于信息 + 检查更新逻辑（v1.1.5）────────────────────────────────────────
+// ── 关于信息 + 检查更新逻辑（v1.1.5，版本号随发布更新）────────────────────
 {
   // 基础信息常量与 package.json 一致（和 factory id === 包名同一套回归）。
   const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8"));
@@ -395,7 +410,7 @@ if (api === undefined) {
   if (api.GITHUB_VERSION_URL?.includes("raw.githubusercontent.com") !== true) fail("GitHub 更新接口不是 raw 文件");
   else ok("更新接口：npm dist-tags + GitHub raw package.json");
 
-  // 语义版本比较（不能按字符串相等，本地 1.1.5 可领先已发布 1.1.2）。
+  // 语义版本比较（不能按字符串相等，本地未发版可领先已发布 1.1.2）。
   if (api.compareVersion("1.1.2", "1.1.5") !== -1) fail("compareVersion 1.1.2 < 1.1.5 判断错");
   if (api.compareVersion("1.1.5", "1.1.2") !== 1) fail("compareVersion 1.1.5 > 1.1.2 判断错");
   if (api.compareVersion("1.1.10", "1.1.9") !== 1) fail("compareVersion 没有按数字比较（1.1.10 应大于 1.1.9）");
@@ -494,13 +509,16 @@ if (api === undefined) {
  * 注册并返回 disposer（调用即从生效列表移除），这样「设置项变化 → dispose +
  * 重新 inject conversation.view」可以被观测到。
  */
-const makeCtx = () => {
+const makeCtx = (options = {}) => {
   const ctx = {
     registrations: [],
     history: [],
     injectCalls: [],
     effectCalls: [],
     effectCleanups: [],
+    // 可选的 better-sidebar 服务软探测桩；默认不安装（undefined）。
+    betterSidebar: options.betterSidebar,
+    cardRegistrations: [],
     slots: {
       inject: (name, factory) => {
         ctx.injectCalls.push(name);
@@ -520,6 +538,8 @@ const makeCtx = () => {
         };
       }
     },
+    // 宿主 guard 允许的软探测：ctx.get('betterSidebar') 缺失返回 undefined。
+    get: (name) => (name === "betterSidebar" ? ctx.betterSidebar : undefined),
     effect: (fn, name) => {
       ctx.effectCalls.push(name);
       const cleanup = fn();
@@ -529,6 +549,19 @@ const makeCtx = () => {
   };
   return ctx;
 };
+
+/** 构造一个记录 registerTab 调用、返回可观测 disposer 的假 better-sidebar 服务。 */
+const makeBetterSidebar = (ctx) => ({
+  registerTab(descriptor) {
+    const entry = { descriptor, disposed: false };
+    ctx.cardRegistrations.push(entry);
+    return () => {
+      entry.disposed = true;
+      const at = ctx.cardRegistrations.indexOf(entry);
+      if (at !== -1) ctx.cardRegistrations.splice(at, 1);
+    };
+  }
+});
 const findSlot = (ctx, name) => ctx.registrations.find((entry) => entry.definition.name === name);
 const countSlot = (ctx, name) => ctx.registrations.filter((entry) => entry.definition.name === name).length;
 
@@ -585,16 +618,16 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   // 假 react 的 useState setter 只改内存、不触发重渲染；每次交互后重新挂载表单，
   // 才能观察到输入框 value / placeholder 与 checkbox checked 的最新值。
   const mountForm = () => mount(react.createElement(settingsSlot.component, {}));
-  const controls = (form) => {
-    const inputs = findInputs(form);
-    return {
-      checkbox: inputs.find((input) => input.getAttribute("type") === "checkbox"),
-      textbox: inputs.find((input) => input.getAttribute("type") === "text")
-    };
-  };
+  // 现在设置页有两组开关/输入框，用 data 属性精确定位，避免次序混淆。
+  const controls = (form) => ({
+    checkbox: findByAttr(form, "data-dsh-plugin-deepseek-chat", "show-tab"),
+    textbox: findByAttr(form, "data-dsh-plugin-deepseek-chat", "tab-label"),
+    cardCheckbox: findByAttr(form, "data-dsh-plugin-deepseek-chat", "show-card"),
+    cardTextbox: findByAttr(form, "data-dsh-plugin-deepseek-chat", "card-label")
+  });
   const PLACEHOLDER = "DeepSeek 聊天";
-  let { checkbox, textbox } = controls(mountForm());
-  if (!checkbox || !textbox) fail("设置页缺少「显示顶部标签栏」复选框或「名称」输入框");
+  let { checkbox, textbox, cardCheckbox, cardTextbox } = controls(mountForm());
+  if (!checkbox || !textbox || !cardCheckbox || !cardTextbox) fail("设置页缺少两对开关/名称输入框");
   else {
     if (checkbox.getAttribute("checked") !== "true") fail("设置页复选框默认应为勾选");
     else if (textbox.getAttribute("value") !== "") fail(`默认名称输入框应为空（灰色占位提示显示默认名），实际 value=${textbox.getAttribute("value")}`);
@@ -647,10 +680,112 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   }
 }
 
-// ── 设置页渲染：关于本插件基础信息 + 检查更新按钮 ─────────────────────────
+// ── 右边栏卡片（better-sidebar 软探测）─────────────────────────────────────
+{
+  // 未安装 better-sidebar：ctx.get('betterSidebar') 返回 undefined，插件其余
+  // 表面照常（上方 desktopCtx 已断言 4 处注册），且不抛错。
+  const noSidebarCtx = makeCtx();
+  moduleExports.apply(noSidebarCtx);
+  if (noSidebarCtx.registrations.length !== 4) fail(`无 better-sidebar 时应仍为 4 处槽位注册，实际 ${noSidebarCtx.registrations.length}`);
+  if (noSidebarCtx.cardRegistrations.length !== 0) fail("无 better-sidebar 时不应注册右边栏卡片");
+  else ok("未安装 better-sidebar：软探测缺席、其余四处表面照常、零报错");
+
+  // 已安装 better-sidebar：注册一张卡片，descriptor 字段与 title thunk 正确。
+  const cardCtx = makeCtx();
+  cardCtx.betterSidebar = makeBetterSidebar(cardCtx);
+  moduleExports.apply(cardCtx);
+  const descriptor = api.cardDescriptor();
+  if (descriptor.id !== api.CARD_ID || descriptor.id !== "@tianyulinfeng1/dsh-plugin-deepseek-chat:card") fail(`卡片 id 不对：${descriptor.id}`);
+  if (descriptor.order !== 60) fail(`卡片 order 不对：${descriptor.order}`);
+  if (descriptor.title() !== "DeepSeek 聊天") fail(`卡片默认名不对：${descriptor.title()}`);
+  if (descriptor.component !== api.CardView) fail("卡片 component 不是 CardView");
+  if (typeof descriptor.icon !== "function" || typeof descriptor.dedupeKey !== "function") fail("卡片缺少 icon/dedupeKey");
+  else ok(`卡片 descriptor：id=${descriptor.id} / order=${descriptor.order} / 默认名="DeepSeek 聊天"`);
+
+  if (cardCtx.cardRegistrations.length !== 1) fail(`应注册 1 张右边栏卡片，实际 ${cardCtx.cardRegistrations.length}`);
+  else ok("已安装 better-sidebar：注册 1 张右边栏卡片（CardView 复用网页聊天）");
+
+  // 改名：title 是 thunk，guide/chip 每次渲染重新求值，无需重新注册。
+  api.writeConfig({ cardLabel: "侧边聊天" });
+  if (descriptor.title() !== "侧边聊天") fail(`改名后 title thunk 没有返回新名字：${descriptor.title()}`);
+  else ok("卡片名称修改即时生效（title thunk 重求值，与顶栏名称独立）");
+  if (api.tabLabel() !== "DeepSeek 聊天") fail("改卡片名误改了顶栏名称（两者应独立）");
+
+  // 关闭开关 → dispose 旧注册；重新开启 → 再次 registerTab。
+  const cardCheckbox = findByAttr(mount(react.createElement(cardCtx.registrations.find((e) => e.definition.name === "settings.section").component, {})),
+    "data-dsh-plugin-deepseek-chat", "show-card");
+  cardCheckbox.dispatch("change", { target: { checked: false } });
+  if (api.getConfig().showCard !== false) fail("卡片开关没有写入 showCard=false");
+  if (cardCtx.cardRegistrations.length !== 0) fail("关闭开关后右边栏卡片仍在注册");
+  else ok("关闭右边栏卡片开关 → 注销 TabDescriptor");
+  api.writeConfig({ showCard: true });
+  if (cardCtx.cardRegistrations.length !== 1) fail("重新开启后没有重新注册右边栏卡片");
+  else ok("重新开启右边栏卡片开关 → 重新 registerTab");
+
+  // 恢复默认，且 effect cleanup 必须注销当前卡片（fiber 卸载清理）。
+  api.writeConfig({ cardLabel: "DeepSeek 聊天", showTab: true, tabLabel: "DeepSeek 聊天", showCard: true });
+  for (const cleanup of cardCtx.effectCleanups) cleanup();
+  if (cardCtx.cardRegistrations.length !== 0) fail("ctx.effect cleanup 没有注销右边栏卡片");
+  else ok("ctx.effect 卸载清理注销右边栏卡片（无孤儿 TabDescriptor）");
+  storage.clear();
+}
+
+// ── 设置页渲染：关于本插件基础信息 + 检查更新按钮 + 三组卡片边框 ─────────
 {
   api.resetUpdateState();
   const form = mount(react.createElement(settingsSlot.component, {}));
+
+  // 三组卡片边框（v1.1.7 美化）：按逻辑分组、用主题令牌细边框/圆角/浅底。
+  const cards = collectElements(form).filter((el) =>
+    el.getAttribute("data-dsh-plugin-deepseek-chat") === "settings-card");
+  if (cards.length !== 3) fail(`设置页应有 3 张分组卡片，实际 ${cards.length}`);
+  else {
+    const expected = {
+      border: ".5px solid var(--dsw-alias-border-l3)",
+      borderRadius: "var(--dsw-radius-sm)",
+      background: "var(--dsw-alias-bg-layer-1)"
+    };
+    let bad = 0;
+    for (const key of Object.keys(expected)) {
+      if (cards.some((el) => el.style[key] !== expected[key])) bad++;
+    }
+    if (cards.some((el) => typeof el.style.background !== "string" || el.style.background.startsWith("#") || /^rgb/i.test(el.style.background))) bad++;
+    if (bad > 0) fail("分组卡片没有全部使用主题令牌的边框/圆角/浅底（或写死了硬编码颜色）");
+    else ok("设置页三组卡片：细边框 + 圆角 + 主题令牌浅底色（明暗自适应、零硬编码颜色）");
+  }
+  // 输入框/按钮/状态行用 bg-base 或 layer-2，与卡片底色拉开层次。
+  const bg = collectElements(form).filter((el) =>
+    ["tab-label", "card-label", "check-update", "update-status"].includes(el.getAttribute("data-dsh-plugin-deepseek-chat")));
+  if (bg.length !== 4) fail(`应有 4 个内层控件，实际 ${bg.length}`);
+  else if (bg.some((el) => el.style.background !== "var(--dsw-alias-bg-base)" && el.style.background !== "var(--dsw-alias-bg-layer-2)")) fail("内层控件背景没有与卡片底色拉开层次");
+  else ok("输入框/按钮/状态行用更高对比底色，与卡片底色分层");
+
+  // 对齐/间距（v1.1.7 微调）：分组标题下移、严格两栏网格、均匀行距、标签不换行。
+  if (cards.length > 0) {
+    const pad = cards[0].style.padding;
+    if (pad !== "12px 18px 14px") fail(`卡片上留白不足，分组标题会贴边框：${pad}`);
+    else ok("卡片上留白 12px，分组标题与边框拉开距离");
+  }
+  const infoRows = collectElements(form).filter((el) =>
+    el.getAttribute("data-dsh-plugin-deepseek-chat") === "info-row");
+  if (infoRows.length !== 5) fail(`关于本插件应有 5 行两栏信息，实际 ${infoRows.length}`);
+  else {
+    let bad = 0;
+    for (const row of infoRows) {
+      if (row.style.display !== "grid" || row.style.gridTemplateColumns !== "88px minmax(0, 1fr)" || row.style.alignItems !== "baseline" || row.style.padding !== "5px 0") bad++;
+      const label = (row.children ?? [])[0];
+      if (!label || label.style?.whiteSpace !== "nowrap") bad++;
+    }
+    if (bad > 0) fail("信息行没有用严格两栏网格对齐（标签列 88px / baseline / 均匀行距 / 标签不换行）");
+    else ok("关于本插件 5 行严格两栏网格对齐：标签列 88px、baseline 对齐、行距均匀、标签不换行");
+  }
+  // 第一个分组标题（关于本插件）的上边距含下移量，且不与后续标题共用 18px。
+  const h3s = collectElements(form).filter((el) => el.tag === "h3");
+  const aboutTitle = h3s.find((el) => collectTexts(el).join("").includes("关于本插件"));
+  if (!aboutTitle) fail("设置页缺少「关于本插件」分组标题");
+  else if (!String(aboutTitle.style.margin).startsWith("2px")) fail(`「关于本插件」标题没有下移：margin=${aboutTitle.style.margin}`);
+  else ok("「关于本插件」标题上边距下移，不再紧贴卡片上边框");
+
   const texts = collectTexts(form).join(" ");
   // 版本号 / 作者 / 功能简介 / 许可证 / 两个链接
   for (const required of [api.PLUGIN_VERSION, api.PLUGIN_AUTHOR, "功能简介", api.PLUGIN_LICENSE, "npm", "GitHub"]) {
@@ -660,6 +795,7 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
 
   // 两个外链：https + target=_blank（桌面壳用系统浏览器打开）。
   const links = collectElements(form).filter((el) => el.tag === "a");
+  // 检查结果附跳转链接时会有 4 个（About 里 2 个 + 结果区 2 个）；这里是 idle 状态。
   if (links.length !== 2) fail(`应有 2 个外链，实际 ${links.length}`);
   else if (links.some((el) => !String(el.getAttribute("href")).startsWith("https://") || el.getAttribute("target") !== "_blank")) {
     fail("外链不是 https + target=_blank");
