@@ -1,6 +1,6 @@
 {
   "name": "@tianyulinfeng1/dsh-plugin-deepseek-chat",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "DeepSeek Chat (chat.deepseek.com) as a DSH sidebar panel, a configurable conversation-header tab, and an optional dsh-better-sidebar right-sidebar card: full main-area chat that fills the conversation area, last-conversation memory, a stable login session, crash containment, a settings page (show/hide each surface + custom names, about info, and a check-for-updates button against npm/GitHub), and pure web chat with no account status strip.",
   "type": "module",
   "main": "lib/index.js",
@@ -20,6 +20,7 @@
     "docs/RELEASE_NOTES_v1.1.2.md",
     "docs/RELEASE_NOTES_v1.1.5.md",
     "docs/RELEASE_NOTES_v1.1.7.md",
+    "docs/RELEASE_NOTES_v1.1.8.md",
     "docs/screenshot.png",
     "docs/screenshot-chat.png",
     "icon.svg",
@@ -54,7 +55,7 @@
   "homepage": "https://github.com/sweet560/dsh-plugin-deepseek-chat#readme",
   "engines": {
     "node": ">=24",
-    "dsh": ">=0.2.2-rc.1"
+    "dsh": ">=0.2.2-rc.2"
   },
   "dsh": {
     "manifestVersion": 1,

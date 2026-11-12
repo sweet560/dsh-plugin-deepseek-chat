@@ -1,4 +1,4 @@
-// dsh-plugin-deepseek-chat 客户端包离线自检（v1.1.7）。
+// dsh-plugin-deepseek-chat 客户端包离线自检（v1.1.8）。
 //
 // 这个包是浏览器 ModuleLoader 脚本，因此自检：
 //   1. 在 vm 里执行它，捕获 __ModuleLoader__.load 的注册；
@@ -7,7 +7,7 @@
 //   4. 在「Web 表层」（无桌面桥，应完全不注册）与「桌面表层」分别执行 apply()；
 //   5. 校验四处槽位注册（左侧栏图标 / 全屏主面板 / 会话顶栏标签页 / 设置页）；
 //   6. 验证 better-sidebar 软探测：未安装时静默跳过，已安装时注册一张右边栏卡片
-//      （title thunk 即时改名、showCard 开关注销/重注册、effect cleanup 清理）；
+//      （title thunk 即时改名、showCard 开关注销/重注册、effect cleanup 清理、服务晚到时有上限的就绪重试）；
 //   7. 验证设置页两对开关与自定义名称能动态重注入顶栏标签页（标签行只在注册表变化时重算）；
 //   8. 验证顶栏标签页是「铺满浮层」（盖住会话输入框）；
 //   9. 迷你渲染面板，跑完 webview 租约、会话记忆、崩溃隔离、弹窗白名单等全流程，
@@ -289,14 +289,45 @@ function collectTexts(node, out = []) {
 }
 
 // ── 加载 bundle ─────────────────────────────────────────────────────────────
+// ── 可控 fake timer（捕获 bundle 内 setTimeout）──────────────────────────────
+// v1.1.8 起服务缺席时会排 500ms×40 的就绪重试；若用真实 timer，自检会被拖住
+// 约 20 秒甚至不退出。这里把 sandbox 里的 setTimeout/clearTimeout 换成可手动
+// 推进的队列；模块级 flushMicrotasks()/settle() 仍用真实 Node timer，互不影响。
+let timerSeq = 0;
+let fakeTimers = [];
+const fakeSetTimeout = (fn, ms) => {
+  const id = ++timerSeq;
+  fakeTimers.push({ id, fn, ms });
+  return id;
+};
+const fakeClearTimeout = (id) => {
+  const at = fakeTimers.findIndex((t) => t.id === id);
+  if (at !== -1) fakeTimers.splice(at, 1);
+};
+const resetTimers = () => { fakeTimers = []; };
+const countTimers = (ms) => fakeTimers.filter((t) => t.ms === ms).length;
+const fireTimers = (ms, maxRounds = 80) => {
+  let fired = 0;
+  for (let round = 0; round < maxRounds; round += 1) {
+    const due = fakeTimers.filter((t) => t.ms === ms);
+    if (due.length === 0) break;
+    for (const t of due) {
+      const at = fakeTimers.indexOf(t);
+      if (at !== -1) fakeTimers.splice(at, 1);
+    }
+    for (const t of due) { t.fn(); fired += 1; }
+  }
+  return fired;
+};
+
 let registration;
 const sandbox = {
   window: { __ModuleLoader__: { load(value) { registration = value; } }, localStorage: localStorageStub },
   navigator: { language: "zh-CN" },
   document: documentStub,
   console,
-  setTimeout,
-  clearTimeout,
+  setTimeout: fakeSetTimeout,
+  clearTimeout: fakeClearTimeout,
   URL,
   Date
 };
@@ -727,6 +758,47 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   for (const cleanup of cardCtx.effectCleanups) cleanup();
   if (cardCtx.cardRegistrations.length !== 0) fail("ctx.effect cleanup 没有注销右边栏卡片");
   else ok("ctx.effect 卸载清理注销右边栏卡片（无孤儿 TabDescriptor）");
+  storage.clear();
+}
+
+// ── 右边栏卡片：服务「晚到」也能注册（v1.1.8 竞态修复）─────────────────────
+{
+  // 清空前面各处 apply() 累积的 fake 重试 timer，只观察本用例。
+  resetTimers();
+  const lateCtx = makeCtx();                      // 故意先不装 better-sidebar
+  moduleExports.apply(lateCtx);                  // 复现 v1.1.7：此刻 ctx.get 为 undefined
+  if (lateCtx.cardRegistrations.length !== 0) fail("服务晚到：apply() 时不应已注册卡片");
+  if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("服务晚到：应排 1 个就绪重试 timer，实际 " + countTimers(api.CARD_RETRY_DELAY));
+  else ok("服务晚到：apply() 改为排下有上限的就绪重试，不再一次性放弃");
+
+  // 模拟 better-sidebar 稍后才 provide()：手动推进重试 timer，卡片应被注册。
+  lateCtx.betterSidebar = makeBetterSidebar(lateCtx);
+  const firedLate = fireTimers(api.CARD_RETRY_DELAY);
+  if (lateCtx.cardRegistrations.length !== 1) fail("服务晚到：推进重试后仍未注册卡片（fired=" + firedLate + "，v1.1.7 会永久缺失）");
+  else ok("服务晚到：推进就绪重试后自动 registerTab，右边栏卡片出现");
+  for (const cleanup of lateCtx.effectCleanups) cleanup();
+  if (lateCtx.cardRegistrations.length !== 0) fail("服务晚到用例的 effect cleanup 没有注销卡片");
+  else ok("服务晚到：effect cleanup 注销卡片");
+
+  // 卸载时 pending 重试 timer 必须被取消（不留孤儿 timer）。
+  resetTimers();
+  const cleanupCtx = makeCtx();
+  moduleExports.apply(cleanupCtx);
+  if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("卸载前应有 1 个 pending 就绪重试 timer");
+  for (const cleanup of cleanupCtx.effectCleanups) cleanup();
+  if (countTimers(api.CARD_RETRY_DELAY) !== 0) fail("ctx.effect cleanup 没有取消 pending 就绪重试 timer");
+  else ok("ctx.effect 卸载清理取消 pending 就绪重试 timer（无孤儿 timer）");
+
+  // 服务始终缺席：重试必须有上限，不能无限排队。
+  resetTimers();
+  const neverCtx = makeCtx();
+  moduleExports.apply(neverCtx);
+  const firedNever = fireTimers(api.CARD_RETRY_DELAY, api.CARD_RETRY_MAX + 10);
+  if (firedNever > api.CARD_RETRY_MAX) fail("就绪重试没有上限：fired=" + firedNever + " > " + api.CARD_RETRY_MAX);
+  else if (neverCtx.cardRegistrations.length !== 0) fail("服务始终缺席却注册了右边栏卡片");
+  else ok("服务始终缺席：就绪重试用尽上限即停止（fired=" + firedNever + " <= " + api.CARD_RETRY_MAX + "），零卡片");
+  for (const cleanup of neverCtx.effectCleanups) cleanup();
+  resetTimers();
   storage.clear();
 }
 

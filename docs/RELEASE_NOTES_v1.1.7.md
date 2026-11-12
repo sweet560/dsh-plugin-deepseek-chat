@@ -160,7 +160,7 @@ https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat
 dsh plugin --profile desktop add file:"<dsh-plugin-deepseek-chat-1.1.7.tgz 绝对路径>"
 ```
 
-**环境要求**：DSH `>= 0.2.2-rc.1`、Node `>= 24`（Node 24 Active LTS）、Windows / macOS / Linux 桌面壳。右边栏卡片额外需要 `dsh-better-sidebar >= 0.30.0` 已安装并启用；不装也能用其余功能。
+**环境要求**：DSH `>= 0.2.2-rc.2`、Node `>= 24`（Node 24 Active LTS）、Windows / macOS / Linux 桌面壳。右边栏卡片额外需要 `dsh-better-sidebar >= 0.30.0` 已安装并启用；不装也能用其余功能。
 
 ---
 

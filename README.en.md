@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-> **Current version: v1.1.7** | Targets DSH **0.2.2-rc.1**
+> **Current version: v1.1.8** | Targets DSH **0.2.2-rc.2**
 
 Adds **DeepSeek Chat** to the **DeepSeek Harness (DSH) desktop**: a sidebar icon entry, a conversation-header tab (default name **DeepSeek Chat**, configurable), and an optional **right-sidebar card** registered through `dsh-better-sidebar` when installed (default name **DeepSeek Chat**, independently configurable). Clicking any of them opens `chat.deepseek.com` filling the conversation area and remembers the last conversation. A **settings page** (with plugin metadata and a "Check for updates" button) lets you show/hide each surface and rename them. The panel is **pure web chat** — no account status strip.
 
@@ -48,13 +48,15 @@ Adds **DeepSeek Chat** to the **DeepSeek Harness (DSH) desktop**: a sidebar icon
 
 > **v1.1.6**: a pure OIDC trusted-publishing pipeline test; same features as v1.1.5.
 
-> **v1.1.7 (this release)**: adds a right-sidebar card following the `dsh-better-sidebar` model (soft `ctx.get('betterSidebar')` probe + `registerTab`, thunk `title` for instant renaming, disposer held by `ctx.effect`), plus a "Show right-sidebar card" switch and a "Right-sidebar card name" field in Settings (default "DeepSeek Chat", independent of the header tab). Zero new dependencies and no inject-declaration changes. See [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md).
+> **v1.1.7**: adds a right-sidebar card following the `dsh-better-sidebar` model (soft `ctx.get('betterSidebar')` probe + `registerTab`, thunk `title` for instant renaming, disposer held by `ctx.effect`), plus a "Show right-sidebar card" switch and a "Right-sidebar card name" field in Settings (default "DeepSeek Chat", independent of the header tab). Zero new dependencies and no inject-declaration changes. See [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md).
+
+> **v1.1.8 (this release)**: fixes the right-sidebar card not appearing. v1.1.7 probed `ctx.get("betterSidebar")` once in `apply()` without declaring `inject`; when `dsh-better-sidebar`'s `ctx.provide` ran later, Cordis only woke fibers that *declared* the service, so the soft-probing plugin was never retried and `registerTab` was never called (the card was missing from the "Sidebar content" settings too). v1.1.8 **re-reads the service on every sync with a bounded, cancellable readiness retry** (browser-global timer, cleaned up by `ctx.effect`), so a late provider is picked up automatically; with better-sidebar absent every other surface still works. Target DSH bumped to **0.2.2-rc.2**. See [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md).
 
 ## Requirements
 
 | Item | Requirement |
 |---|---|
-| DSH | Desktop `0.2.2-rc.1` or newer |
+| DSH | Desktop `0.2.2-rc.2` or newer |
 | Platform | Windows / macOS / Linux desktop shell |
 | git | Only for the GitHub install route (pnpm fetches the repository) |
 
@@ -162,6 +164,7 @@ The current implementation guards every guest call behind an `isConnected` check
 
 | Version | Changes |
 |---|---|
+| **1.1.8** | **Fixes the right-sidebar card load-order race + targets DSH 0.2.2-rc.2**: v1.1.7 probed `ctx.get("betterSidebar")` once in `apply()` without declaring `inject`; when `dsh-better-sidebar`'s `ctx.provide` ran later, Cordis only woke fibers that declared the service, so the soft-probing plugin was never retried and `registerTab` was never called (the card was also missing from the "Sidebar content" settings). v1.1.8 **re-reads the service on every sync with a bounded, cancellable readiness retry** (browser-global timer, cleaned up by `ctx.effect`), so a late provider is picked up automatically; with better-sidebar absent every other surface still works. Target DSH bumped to `0.2.2-rc.2` (crash-log quotes and old release notes keep rc.1). New self-check assertions for "late service registers / retry is bounded / cleanup cancels timer"; passes fully (`RESULT: PASS`). See [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md). |
 | **1.1.7** | **Adds a right-sidebar card (dsh-better-sidebar)**: soft `ctx.get('betterSidebar')` probe + `registerTab` (`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`, `order: 60`, single instance, reuses the web-chat webview), thunk `title` for instant renaming, disposer held by `ctx.effect`; Settings gains a "Show right-sidebar card" switch and a "Right-sidebar card name" field (default "DeepSeek Chat", independent of the header tab). Zero new dependencies, no inject-declaration changes. Offline self-check passes fully (`RESULT: PASS`). See [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md). |
 | **1.1.6** | **OIDC trusted-publishing pipeline test**: `.github/workflows/publish.yml` now enables `permissions.id-token: write`, Node 24 (Active LTS), `npm@latest`, `npm publish --provenance`, and removes `NODE_AUTH_TOKEN` and the `environment` declaration. Version bumped to `1.1.6` and pushed to GitHub to test whether GitHub Actions can publish via npm Trusted Publisher. No functional change from 1.1.5. |
 | **1.1.5** | **Adds About info + Check for updates to Settings**: plugin version / author / description / license / npm & GitHub links, plus a "Check for updates" button (npm `dist-tags` first, GitHub `raw` fallback, numeric segment-by-segment version comparison, text status + jump links, 8-second timeout and failure fallbacks). Metadata constants are asserted equal to `package.json`; offline self-check passes fully (`RESULT: PASS`). |

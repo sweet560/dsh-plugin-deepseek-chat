@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.8 — 2026-11-12
+
+### 修复右边栏卡片不出现的加载顺序竞态 + 支持版本更新到 DSH 0.2.2-rc.2
+
+- **根因（实锤）**：v1.1.7 在 `apply()` 开头一次性 `ctx.get("betterSidebar")`，且不把 `betterSidebar` 写进 `exports.inject`。Cordis 的 `notify()` 只唤醒「在 `inject` 里声明了该服务」的 fiber（`if (!(name in fiber.inject)) continue;`），`ctx.get()` 软读不登记 dependent。`dsh.client.inject` 只保证工厂加载顺序、不保证 `provide()`/`apply()` 顺序；因此若 better-sidebar 的 `ctx.provide('betterSidebar', service)` 稍晚执行，本插件读到 `undefined` 后**永不重试**，`syncCard()` 静默 return，`registerTab` 从未被调用 → `getTabs()` 只有内置 6 项 → 设置页「侧边栏内容」与「+ 添加 Tab 插件」都看不到卡片。桌面日志无任何报错，印证「不是抛错，是根本没调用」。不是 0.31.1 接口变更、也不是 descriptor 写错。
+- **修复**：保留软依赖（better-sidebar 缺失时其余功能照常），把一次性软探测换成「每次 `sync()` 都重读 `ctx.get('betterSidebar')` + 有上限、可取消的就绪重试」。`CARD_RETRY_DELAY = 500`、`CARD_RETRY_MAX = 40`（最长约 20 秒），只用**浏览器全局** `setTimeout`/`clearTimeout`（`ctx.setTimeout` 被 guard 的 `'timer'` inject 门禁挡住）；服务一到位立即 `registerTab`，`ctx.effect` 的 disposer 在 HMR / 卸载时 `cancelCardRetry()` + 注销卡片。不把 `betterSidebar` 写进 `exports.inject`（那会让 runner 在服务缺失时把整个插件 park，左侧栏 / 主面板 / 设置页全失效）。
+- **支持版本**：中英 README「适配 DSH」/环境要求表、`package.json` 的 `engines.dsh`、`docs/RELEASE_NOTES_v1.1.7.md` 环境要求改为 `0.2.2-rc.2`；崩溃日志原文、旧发布说明与「当时核对的版本」等历史事实保留 `0.2.2-rc.1`，不篡改。
+- **Verification**：`node --check lib/client.js` 通过；`npm test` → `RESULT: PASS`（新增「服务晚到也能注册」「就绪重试有上限」「ctx.effect cleanup 取消 pending timer」等断言，自检用可控 fake timer 驱动重试、不让真实 500ms×40 拖慢进程）；`git diff --check` 通过。
+- **Packaging**：版本升 `1.1.8`，新增中文 `docs/RELEASE_NOTES_v1.1.8.md` 并加入 `package.json` 的 `files`。
+
 ## 1.1.7 — 2026-11-12
 
 ### 新增右边栏卡片（dsh-better-sidebar）与设置页开关/命名

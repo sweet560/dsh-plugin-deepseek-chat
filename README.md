@@ -2,7 +2,7 @@
 
 [English](README.en.md) | 中文
 
-> **当前版本：v1.1.7** ｜适配 DSH **0.2.2-rc.1**
+> **当前版本：v1.1.8** ｜适配 DSH **0.2.2-rc.2**
 
 在 **DeepSeek Harness（DSH）桌面版**加入 **DeepSeek 聊天**：左侧栏图标入口、会话顶栏标签页（默认名「DeepSeek 聊天」，可在设置页开关 / 自定义），以及通过 **dsh-better-sidebar**（若已安装）注册的**右边栏卡片**（默认名「DeepSeek 聊天」，独立开关 / 自定义），点开后 `chat.deepseek.com` 铺满会话区，记住上次所在的会话；提供**设置页面**（含插件基础信息与「检查更新」按钮），面板为**纯网页聊天**，不显示账号状态。
 
@@ -48,13 +48,15 @@
 
 > **v1.1.6**：纯发布链路测试（OIDC 可信发布），功能与 1.1.5 相同。
 
-> **v1.1.7（本版）**：按 `dsh-better-sidebar` 原理新增右边栏卡片（软探测 `ctx.get('betterSidebar')` + `registerTab`、`title` thunk 即时改名、`ctx.effect` 持有 disposer），设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。
+> **v1.1.7**：按 `dsh-better-sidebar` 原理新增右边栏卡片（软探测 `ctx.get('betterSidebar')` + `registerTab`、`title` thunk 即时改名、`ctx.effect` 持有 disposer），设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。
+
+> **v1.1.8（本版）**：修复右边栏卡片不出现的 bug——v1.1.7 在 `apply()` 里一次性 `ctx.get("betterSidebar")` 且不声明 `inject`，若 `dsh-better-sidebar` 的 `ctx.provide` 稍晚执行，Cordis 只唤醒声明过该服务的 fiber，软探测的插件永远不会被重试，卡片就注册不上（设置页「侧边栏内容」里也看不到）。v1.1.8 改为**每次重读服务 + 有上限、可取消的就绪重试**（浏览器全局 timer、`ctx.effect` 卸载时清理），服务晚到也能自动注册；未安装 better-sidebar 时其余功能照常。支持版本更新到 DSH **0.2.2-rc.2**。详见 [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md)。
 
 ## 环境要求
 
 | 项 | 要求 |
 |---|---|
-| DSH | 桌面版 `0.2.2-rc.1` 或更新 |
+| DSH | 桌面版 `0.2.2-rc.2` 或更新 |
 | 平台 | Windows / macOS / Linux 桌面壳 |
 | git | 仅「GitHub 安装」方式需要（pnpm 通过 git 拉取仓库） |
 
@@ -170,6 +172,7 @@ DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-
 
 | 版本 | 内容 |
 |---|---|
+| **1.1.8** | **修复右边栏卡片不出现的加载顺序竞态 + 支持 DSH 0.2.2-rc.2**：v1.1.7 在 `apply()` 里一次性 `ctx.get("betterSidebar")` 且不声明 `inject`，若 `dsh-better-sidebar` 的 `ctx.provide` 稍晚，Cordis 只唤醒声明过该服务的 fiber，软探测的插件永远不会被重试，卡片就注册不上（设置页「侧边栏内容」里也看不到）。v1.1.8 改为**每次重读服务 + 有上限、可取消的就绪重试**（浏览器全局 timer，`ctx.effect` 卸载时清理），服务晚到也能自动 `registerTab`；未安装 better-sidebar 时其余功能照常。支持版本标注更新到 DSH `0.2.2-rc.2`（崩溃日志原文与旧发布说明保留 rc.1）。离线自检新增「服务晚到也能注册 / 重试有上限 / cleanup 取消 timer」断言，全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md)。 |
 | **1.1.7** | **新增右边栏卡片（dsh-better-sidebar）**：`ctx.get('betterSidebar')` 软探测 + `registerTab`（`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`、`order: 60`、复用网页聊天 webview），`title` thunk 即时改名、`ctx.effect` 持有 disposer；设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。离线自检全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。 |
 | **1.1.6** | **OIDC 可信发布链路测试**：`.github/workflows/publish.yml` 启用 `permissions.id-token: write`、Node 24（Active LTS）、`npm@latest`、`npm publish --provenance`，移除 `NODE_AUTH_TOKEN` 与 `environment` 声明；版本号升到 `1.1.6` 推送 GitHub，实测 GitHub Actions 能否经 npm Trusted Publisher 自动发布。功能与 1.1.5 相同，仅发布链路变更。 |
 | **1.1.5** | **设置页新增关于信息 + 检查更新**：新增插件版本号 / 作者 / 功能简介 / 许可证 / npm·GitHub 链接，以及「检查更新」按钮（npm `dist-tags` 优先、GitHub `raw` 兜底、数字逐段版本比较、文字状态 + 跳转链接、8 秒超时与失败兜底）；元信息常量与 `package.json` 一致性断言、离线自检全部通过（`RESULT: PASS`）。 |
