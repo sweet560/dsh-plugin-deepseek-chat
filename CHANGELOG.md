@@ -11,6 +11,7 @@ All notable changes to this project are documented here.
 - **支持版本**：中英 README「适配 DSH」/环境要求表、`package.json` 的 `engines.dsh`、`docs/RELEASE_NOTES_v1.1.7.md` 环境要求改为 `0.2.2-rc.2`；崩溃日志原文、旧发布说明与「当时核对的版本」等历史事实保留 `0.2.2-rc.1`，不篡改。
 - **Verification**：`node --check lib/client.js` 通过；`npm test` → `RESULT: PASS`（新增「服务晚到也能注册」「就绪重试有上限」「ctx.effect cleanup 取消 pending timer」等断言，自检用可控 fake timer 驱动重试、不让真实 500ms×40 拖慢进程）；`git diff --check` 通过。
 - **Packaging**：版本升 `1.1.8`，新增中文 `docs/RELEASE_NOTES_v1.1.8.md` 并加入 `package.json` 的 `files`。
+- **CI 加固（1.1.8 发布后，未升版本）**：`push main` 与 `push tag` 仍各触发一次 publish，按仓库串行已生效；实测 npm 注册表传播延迟超过「发布前 6×5s + E409 后 10×3s」轮询窗口，后跑的运行 E409 兜底因 `npm view` 仍读不到而误报红叉（1.1.8 本身已由先跑运行成功发布、属良性竞态）。改为**E409 一律视为成功**：E409 是「版本已发布」的确定性信号，`npm view` 只做一次 best-effort 观测写进日志、不再作为成功前提；发布前轮询守卫保留用于正常情况下干净跳过。不重建 tag / Release / tarball、不发新版本。
 
 ## 1.1.7 — 2026-11-12
 
