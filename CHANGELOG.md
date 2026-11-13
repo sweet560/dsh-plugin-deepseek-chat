@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented here.
 
+## 1.1.10 — 2026-11-13
+
+### 设置页「一键更新」：与检查更新集成、真调 Host 官方通道、失败如实提示
+
+- **需求（m04558 / 卡片 m04643）**：设置页「检查更新」发现新版本后，在红框位置跳出「立即更新」按钮，点击一下就自动更新插件；用户选择「真调用官方通道 + 失败如实提示」与「升到 1.1.10，先不发布」。
+- **现成通道（不重复造轮子）**：复用 DSH Host 的 `pluginManager.updateBundle(name, version)`（`@deepseek-ai/dsh-plugin-manager/lib/index.js:2557`），客户端动态插件在**点击时**用 `ctx.get("remote")?.pluginManager?.updateBundle(PLUGIN_NAME, latest)` 软读调用。guard 允许 `ctx.get(name)` 软读（`dsh-cordis-client-runner/src/client/guard.ts:220`），返回 `guardedService` Proxy；`.pluginManager` 是非函数命名空间被 `denyContext` 原样放行，`updateBundle` 的 `this` 仍绑定该命名空间。**不把 `remote` 写进 `exports.inject`**（仍 `["slots"]`）——冷启动时若声明的 Host 服务晚到，runner 会把整个插件 fiber park（`runtime.ts:393`），其余三个入口全失效。
+- **状态映射**：`runUpdate(ctx, version, onChange)` 全程 try/catch、状态经 `setUpdateState` + `onChange` 发布。按 `PluginUpdateResult.result.application` 分：`applied` → 「更新完成」；`restart-required` → 「已安装，请重启 DSH 生效」（无 HMR 时 `src/index.ts:1381` 返回此态）；`failed` / `cancelled` / `overridden` → 「更新失败：<原因>」。错误对象可能是 `{code, diagnostic}` 而非 `Error`（`refusedBefore` 的 link: 拒绝路径就没有 `message`），所以原因取 `error.message ?? error.diagnostic ?? error.code`。无 `updateBundle` 时提示「当前环境无法调用插件更新通道」。
+- **UI**：`COPY` 新增中英 7 条文案；`updateState` 扩出 `updating / updated / restart-required / update-failed`；`updateStatusLine()` 增加相应分支；「立即更新」按钮**只在 `status === "found"`** 出现在 `update-status` 结果区（截图红框位置），带 `data-dsh-plugin-deepseek-chat: "update-now"`、复用 `styles.updateButton`；`showLinks` 扩到所有终态，npm / GitHub 跳转链接始终保留作手动兜底；`makeSettingsView(ctx)` 传入 ctx 供按钮软读。
+- **如实限制**：本机是 `link:` 本地安装，`updateRefusal`（`lib/index.js:1693` `installed neither from a registry under its own name nor from a Git commit`）必拒绝更新；只有从 npm 正式安装的真实用户能一键成功。本机 v1.1.9（未发布）高于 npm 已发布 1.1.8，改完点「检查更新」仍是「已是最新版本」、按钮不出现，须等发布更高版本才可见。
+- **Verification**：`node --check lib/client.js` 通过；`npm test` → `RESULT: PASS`（测试桩 `makeCtx` 新增 `remote` 软读分支 + 可配置 fake `pluginManager.updateBundle`；新增「idle 不出按钮 / found 才出按钮 / 点击真调且参数=包名+9.9.9 / applied / restart-required / link: 被拒如实显示 diagnostic / 无通道 / 失败后仍保留 2 个兜底链接」断言）；`git diff --check` 通过。
+- **Packaging**：版本升 `1.1.10`，新增中文 `docs/RELEASE_NOTES_v1.1.10.md` 并加入 `package.json` 的 `files`；中英 README / CHANGELOG / locale 描述同步。
+- **发布**：按用户确认**先不推送发布**——不 commit / 不 push / 不 tag / 不建 Release，改动只留本地工作区。
+
+## 1.1.9 — 2026-11-13
+
+### 修复「重启后需手动开关一次才出右边栏卡片」+ 右边栏卡片双路径（better-sidebar 正常运行 / DSH 原生直注）
+
+- **根因（实锤）**：v1.1.8 用「500ms × 40 ≈ 20 秒」的**有限**就绪重试窗口等待 `ctx.get("betterSidebar")`。better-sidebar 0.31.1 声明 `inject = ['slots','sessions','locale','modules','connection','remote','remote.session']`，冷启动要等这些 Host 传输服务就绪、其 fiber 才 active，位于 `apply()` 内的 `ctx.provide('betterSidebar', service)`（`src/client/index.tsx:175`）才发生。若窗口在服务就绪前耗尽，卡片永远注册不上；手动关/开设置开关会触发 `sync()` 重读、此时服务早已就绪，于是「救回来」——这正是每次重启都要手动开关一次的原因。桌面日志无任何 v1.1.8 报错，印证「不是抛错，是重试窗口耗尽后不再尝试」。「已安装」≠「正常运行」，本次修复正是以「服务是否可用」为准（用户 m04379 / m04395 的证据要求）。
+- **修复（就绪机制根治）**：去掉 `CARD_RETRY_MAX` 硬上限，改为三层触发、任一层到位即注册：① `ctx.on('internal/service', ..., { global: true })` 监听 Cordis 的服务就绪事件（provider fiber 变 active 时 `notify` 会补发 `internal/service`），收到 `betterSidebar` / `sidebarRightTabs` 立即 `syncCard()`；② 无界但可取消的 500ms 浏览器全局 timer 兜底（不能用 `ctx.setTimeout`，guard 的 `TIMER_VERBS` 要求声明 `'timer'`；也不能用 `ctx.inject`，动态插件的 guarded ctx 无该动词）；③ 每次 `sync()` 重读服务。所有 disposer / 事件监听 / timer 由 `ctx.effect` 返回的闭包统一清理，HMR / 卸载无残留。仍**不**把 `betterSidebar` 写进 `exports.inject`（runner 在服务缺失时会把整个插件 fiber park，导致其余表面全失效）。
+- **检测与双路径（按用户 m04201 / m04379）**：不区分「装了但启动晚」与「根本没装」，纯以 `ctx.get("betterSidebar")` 是否返回带 `registerTab` 的可用服务（即「正常运行」）为唯一判据：可用 → better-sidebar `registerTab(cardDescriptor())`；不可用 → DSH 自带原生右侧栏 `ctx.get("sidebarRightTabs").register(nativeCardDefinition())` + `ctx.slots.inject('sidebar.right.pane.tab', ...)` 正文槽（`key = CARD_ID`；title 槽省略，chip 文字由 `definition.title(address)` 提供）。两路径互斥（`activeCardPath` 记录当前路径、相同则跳过以免重建 webview）；晚到的 betterSidebar 服务经 `internal/service` 事件把原生卡片注销并切换到 better-sidebar 卡片。原生服务由 shipped 包 `@deepseek-ai/dsh-client-ui-sidebar-right` 在 `apply()` 顶层提供，无启动竞态。
+- **保留**：`config.showCard` 开关、卡片名称与 `title` thunk、Web 表层 inert 守卫、四处槽位注册（main / sidebar.panellist / settings.section / conversation.view）、关于本插件与检查更新、会话记忆与崩溃隔离。
+- **Verification**：`node --check lib/client.js` 通过；`npm test` → `RESULT: PASS`（测试桩用可控 fake timer + `internal/service` 事件模拟，新增「两服务全缺席零卡片 / better 正常运行只走 registerTab 且原生直注跳过 / 原生直注 type+body 槽与 nativeCardDefinition 契约 / 服务晚到事件切换路径 / 无界 timer 推进 50 轮仍可注册 / cleanup 注销卡片、移除监听、取消 timer」等断言）；`git diff --check` 通过。
+- **Packaging**：版本升 `1.1.9`，新增中文 `docs/RELEASE_NOTES_v1.1.9.md` 并加入 `package.json` 的 `files`。
+- **发布**：按用户确认**先不推送发布**：不 commit / 不 push / 不 tag / 不建 Release，等用户从托盘彻底退出 DSH 重启、确认「不用手动开关也能出卡片」后再决定是否发布。
+
 ## 1.1.8 — 2026-11-12
 
 ### 修复右边栏卡片不出现的加载顺序竞态 + 支持版本更新到 DSH 0.2.2-rc.2

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DeepSeek 聊天",
-    "description": "在左侧栏加入 chat.deepseek.com 聊天面板、会话顶栏可开关可自定义名称的标签页（默认「DeepSeek 聊天」），以及通过 dsh-better-sidebar（若已安装）注册的可开关可自定义名称的右边栏卡片（默认「DeepSeek 聊天」）；选中标签时网页铺满会话区、盖住输入框，记住上次会话，固定登录会话不因切换面板而重新扫码；提供设置页（显示插件版本号、作者、功能简介、许可证、npm/GitHub 链接，并可从 npm/GitHub 检查更新），面板为纯网页聊天、不显示账号状态。"
+    "description": "在左侧栏加入 chat.deepseek.com 聊天面板、会话顶栏可开关可自定义名称的标签页（默认「DeepSeek 聊天」），以及可开关可自定义名称的右边栏卡片（默认「DeepSeek 聊天」）——右边栏卡片按 better-sidebar 服务是否正常运行自动选择经它注册或直注 DSH 自带原生右侧栏；选中标签时网页铺满会话区、盖住输入框，记住上次会话，固定登录会话不因切换面板而重新扫码；提供设置页（显示插件版本号、作者、功能简介、许可证、npm/GitHub 链接，并可从 npm/GitHub 检查更新，发现新版本时结果区出现「立即更新」按钮、点击真调 DSH Host 官方 pluginManager.updateBundle 一键更新并如实提示成功/需重启/失败），面板为纯网页聊天、不显示账号状态。"
   }
 }

@@ -1,4 +1,4 @@
-// dsh-plugin-deepseek-chat 客户端包离线自检（v1.1.8）。
+// dsh-plugin-deepseek-chat 客户端包离线自检（v1.1.10）。
 //
 // 这个包是浏览器 ModuleLoader 脚本，因此自检：
 //   1. 在 vm 里执行它，捕获 __ModuleLoader__.load 的注册；
@@ -6,13 +6,16 @@
 //   3. 验证配置层（四项设置：开关/名称 × 顶栏标签与右边栏卡片，默认值、类型校验、持久化、订阅通知）；
 //   4. 在「Web 表层」（无桌面桥，应完全不注册）与「桌面表层」分别执行 apply()；
 //   5. 校验四处槽位注册（左侧栏图标 / 全屏主面板 / 会话顶栏标签页 / 设置页）；
-//   6. 验证 better-sidebar 软探测：未安装时静默跳过，已安装时注册一张右边栏卡片
-//      （title thunk 即时改名、showCard 开关注销/重注册、effect cleanup 清理、服务晚到时有上限的就绪重试）；
+//   6. 验证右边栏卡片双路径：better-sidebar 服务正常运行时走 registerTab，
+//      未运行时（装了但冷启动 pending / 根本没装）走 DSH 原生右侧栏直注；
+//      两路径互斥，服务晚到经 internal/service 事件 + 无上限兜底 timer 自动切换，
+//      不需要手动开关；title thunk 即时改名、showCard 开关注销/重注册、
+//      effect cleanup 清理卡片 / timer / 服务监听；
 //   7. 验证设置页两对开关与自定义名称能动态重注入顶栏标签页（标签行只在注册表变化时重算）；
 //   8. 验证顶栏标签页是「铺满浮层」（盖住会话输入框）；
 //   9. 迷你渲染面板，跑完 webview 租约、会话记忆、崩溃隔离、弹窗白名单等全流程，
 //      并断言面板里不再有账号状态条；
-//  10. 关于信息 + 检查更新（npm 优先 / GitHub 兜底、语义版本、状态与跳转链接）。
+//  10. 关于信息 + 检查更新 + 一键更新（真调 pluginManager.updateBundle，成功/需重启/失败/无通道如实提示）。
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
@@ -290,9 +293,9 @@ function collectTexts(node, out = []) {
 
 // ── 加载 bundle ─────────────────────────────────────────────────────────────
 // ── 可控 fake timer（捕获 bundle 内 setTimeout）──────────────────────────────
-// v1.1.8 起服务缺席时会排 500ms×40 的就绪重试；若用真实 timer，自检会被拖住
-// 约 20 秒甚至不退出。这里把 sandbox 里的 setTimeout/clearTimeout 换成可手动
-// 推进的队列；模块级 flushMicrotasks()/settle() 仍用真实 Node timer，互不影响。
+// v1.1.9 起服务缺席时会排无上限的 500ms 就绪探测；若用真实 timer，自检会被拖住
+// 甚至不退出。这里把 sandbox 里的 setTimeout/clearTimeout 换成可手动推进的队列；
+// 模块级 flushMicrotasks()/settle() 仍用真实 Node timer，互不影响。
 let timerSeq = 0;
 let fakeTimers = [];
 const fakeSetTimeout = (fn, ms) => {
@@ -547,9 +550,13 @@ const makeCtx = (options = {}) => {
     injectCalls: [],
     effectCalls: [],
     effectCleanups: [],
-    // 可选的 better-sidebar 服务软探测桩；默认不安装（undefined）。
+    // 可选的服务软探测桩：默认都缺席（冷启动 / 未安装）。
     betterSidebar: options.betterSidebar,
-    cardRegistrations: [],
+    sidebarRightTabs: options.sidebarRightTabs,
+    remote: options.remote,
+    cardRegistrations: [],       // better-sidebar registerTab 的记录
+    nativeRegistrations: [],     // DSH 原生 sidebarRightTabs.register 的记录
+    serviceListeners: [],        // ctx.on('internal/service') 的记录
     slots: {
       inject: (name, factory) => {
         ctx.injectCalls.push(name);
@@ -569,8 +576,29 @@ const makeCtx = (options = {}) => {
         };
       }
     },
-    // 宿主 guard 允许的软探测：ctx.get('betterSidebar') 缺失返回 undefined。
-    get: (name) => (name === "betterSidebar" ? ctx.betterSidebar : undefined),
+    // 宿主 guard 允许的软探测：服务缺失返回 undefined（不登记 dependent）。
+    get: (name) => {
+      if (name === "betterSidebar") return ctx.betterSidebar;
+      if (name === "sidebarRightTabs") return ctx.sidebarRightTabs;
+      if (name === "remote") return ctx.remote;
+      return undefined;
+    },
+    // 模拟 Cordis 的 ctx.on / internal/service 事件（真实环境由 frame emit）。
+    on: (name, listener, options) => {
+      const entry = { name, listener, options };
+      ctx.serviceListeners.push(entry);
+      return () => {
+        const at = ctx.serviceListeners.indexOf(entry);
+        if (at !== -1) ctx.serviceListeners.splice(at, 1);
+      };
+    },
+    emitService: (serviceName, value) => {
+      // 真实 Cordis：providers 在 fiber active 时 emit("internal/service", name, value)，
+      // 监听器注册在 "internal/service" 名下、收到的第一个参数才是服务名。
+      for (const entry of [...ctx.serviceListeners]) {
+        if (entry.name === "internal/service") entry.listener(serviceName, value);
+      }
+    },
     effect: (fn, name) => {
       ctx.effectCalls.push(name);
       const cleanup = fn();
@@ -590,6 +618,18 @@ const makeBetterSidebar = (ctx) => ({
       entry.disposed = true;
       const at = ctx.cardRegistrations.indexOf(entry);
       if (at !== -1) ctx.cardRegistrations.splice(at, 1);
+    };
+  }
+});
+/** 构造一个记录 register(definition)、返回可观测 disposer 的假原生 registry。 */
+const makeNativeRegistry = (ctx) => ({
+  register(definition) {
+    const entry = { definition, disposed: false };
+    ctx.nativeRegistrations.push(entry);
+    return () => {
+      entry.disposed = true;
+      const at = ctx.nativeRegistrations.indexOf(entry);
+      if (at !== -1) ctx.nativeRegistrations.splice(at, 1);
     };
   }
 });
@@ -711,93 +751,117 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   }
 }
 
-// ── 右边栏卡片（better-sidebar 软探测）─────────────────────────────────────
+// ── 右边栏卡片（v1.1.9 双路径：better-sidebar 正常运行 / DSH 原生直注）────
 {
-  // 未安装 better-sidebar：ctx.get('betterSidebar') 返回 undefined，插件其余
-  // 表面照常（上方 desktopCtx 已断言 4 处注册），且不抛错。
-  const noSidebarCtx = makeCtx();
-  moduleExports.apply(noSidebarCtx);
-  if (noSidebarCtx.registrations.length !== 4) fail(`无 better-sidebar 时应仍为 4 处槽位注册，实际 ${noSidebarCtx.registrations.length}`);
-  if (noSidebarCtx.cardRegistrations.length !== 0) fail("无 better-sidebar 时不应注册右边栏卡片");
-  else ok("未安装 better-sidebar：软探测缺席、其余四处表面照常、零报错");
+  // 路径判据只有一条：ctx.get('betterSidebar') 是否返回可用的 registerTab 服务。
+  // better-sidebar 未运行（装了但冷启动 pending / 根本没装）→ DSH 原生直注。
+  // 两路径互斥；晚到的服务经 internal/service 事件或兜底 timer 自动切换，
+  // 根治 v1.1.8「20 秒窗口过期、必须手动关开」的 bug。
 
-  // 已安装 better-sidebar：注册一张卡片，descriptor 字段与 title thunk 正确。
-  const cardCtx = makeCtx();
-  cardCtx.betterSidebar = makeBetterSidebar(cardCtx);
-  moduleExports.apply(cardCtx);
-  const descriptor = api.cardDescriptor();
-  if (descriptor.id !== api.CARD_ID || descriptor.id !== "@tianyulinfeng1/dsh-plugin-deepseek-chat:card") fail(`卡片 id 不对：${descriptor.id}`);
-  if (descriptor.order !== 60) fail(`卡片 order 不对：${descriptor.order}`);
-  if (descriptor.title() !== "DeepSeek 聊天") fail(`卡片默认名不对：${descriptor.title()}`);
-  if (descriptor.component !== api.CardView) fail("卡片 component 不是 CardView");
-  if (typeof descriptor.icon !== "function" || typeof descriptor.dedupeKey !== "function") fail("卡片缺少 icon/dedupeKey");
-  else ok(`卡片 descriptor：id=${descriptor.id} / order=${descriptor.order} / 默认名="DeepSeek 聊天"`);
-
-  if (cardCtx.cardRegistrations.length !== 1) fail(`应注册 1 张右边栏卡片，实际 ${cardCtx.cardRegistrations.length}`);
-  else ok("已安装 better-sidebar：注册 1 张右边栏卡片（CardView 复用网页聊天）");
-
-  // 改名：title 是 thunk，guide/chip 每次渲染重新求值，无需重新注册。
-  api.writeConfig({ cardLabel: "侧边聊天" });
-  if (descriptor.title() !== "侧边聊天") fail(`改名后 title thunk 没有返回新名字：${descriptor.title()}`);
-  else ok("卡片名称修改即时生效（title thunk 重求值，与顶栏名称独立）");
-  if (api.tabLabel() !== "DeepSeek 聊天") fail("改卡片名误改了顶栏名称（两者应独立）");
-
-  // 关闭开关 → dispose 旧注册；重新开启 → 再次 registerTab。
-  const cardCheckbox = findByAttr(mount(react.createElement(cardCtx.registrations.find((e) => e.definition.name === "settings.section").component, {})),
-    "data-dsh-plugin-deepseek-chat", "show-card");
-  cardCheckbox.dispatch("change", { target: { checked: false } });
-  if (api.getConfig().showCard !== false) fail("卡片开关没有写入 showCard=false");
-  if (cardCtx.cardRegistrations.length !== 0) fail("关闭开关后右边栏卡片仍在注册");
-  else ok("关闭右边栏卡片开关 → 注销 TabDescriptor");
-  api.writeConfig({ showCard: true });
-  if (cardCtx.cardRegistrations.length !== 1) fail("重新开启后没有重新注册右边栏卡片");
-  else ok("重新开启右边栏卡片开关 → 重新 registerTab");
-
-  // 恢复默认，且 effect cleanup 必须注销当前卡片（fiber 卸载清理）。
-  api.writeConfig({ cardLabel: "DeepSeek 聊天", showTab: true, tabLabel: "DeepSeek 聊天", showCard: true });
-  for (const cleanup of cardCtx.effectCleanups) cleanup();
-  if (cardCtx.cardRegistrations.length !== 0) fail("ctx.effect cleanup 没有注销右边栏卡片");
-  else ok("ctx.effect 卸载清理注销右边栏卡片（无孤儿 TabDescriptor）");
-  storage.clear();
-}
-
-// ── 右边栏卡片：服务「晚到」也能注册（v1.1.8 竞态修复）─────────────────────
-{
-  // 清空前面各处 apply() 累积的 fake 重试 timer，只观察本用例。
+  // ① 两个服务都不可用：其余四处表面照常，零卡片，但持续排队就绪探测。
   resetTimers();
-  const lateCtx = makeCtx();                      // 故意先不装 better-sidebar
-  moduleExports.apply(lateCtx);                  // 复现 v1.1.7：此刻 ctx.get 为 undefined
-  if (lateCtx.cardRegistrations.length !== 0) fail("服务晚到：apply() 时不应已注册卡片");
-  if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("服务晚到：应排 1 个就绪重试 timer，实际 " + countTimers(api.CARD_RETRY_DELAY));
-  else ok("服务晚到：apply() 改为排下有上限的就绪重试，不再一次性放弃");
+  const noneCtx = makeCtx();
+  moduleExports.apply(noneCtx);
+  if (noneCtx.registrations.length !== 4) fail("服务全缺席时应仍为 4 处槽位注册，实际 " + noneCtx.registrations.length);
+  else if (noneCtx.cardRegistrations.length !== 0 || noneCtx.nativeRegistrations.length !== 0) fail("服务全缺席时不应注册任何右边栏卡片");
+  else ok("服务全缺席：better-sidebar 未运行且原生 registry 未就绪 → 零卡片、其余四处表面照常");
+  if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("服务全缺席：应排队 1 个无上限就绪探测 timer");
+  else ok("服务全缺席：排下可取消的就绪探测（v1.1.9 无 20 秒硬上限）");
 
-  // 模拟 better-sidebar 稍后才 provide()：手动推进重试 timer，卡片应被注册。
+  // ② better-sidebar 正常运行 → 走 registerTab；原生 registry 即便也在也不注册（互斥）。
+  const betterCtx = makeCtx();
+  betterCtx.betterSidebar = makeBetterSidebar(betterCtx);
+  betterCtx.sidebarRightTabs = makeNativeRegistry(betterCtx);   // 故意同时提供，验证 better 优先
+  moduleExports.apply(betterCtx);
+  if (betterCtx.cardRegistrations.length !== 1) fail("better-sidebar 正常运行时应注册 1 张卡片，实际 " + betterCtx.cardRegistrations.length);
+  else if (betterCtx.nativeRegistrations.length !== 0 || countSlot(betterCtx, "sidebar.right.pane.tab") !== 0) fail("better-sidebar 正常运行时不应再走原生直注（两路径须互斥）");
+  else ok("better-sidebar 正常运行 → 只走 registerTab；原生直注被跳过（两路径互斥）");
+
+  const descriptor = api.cardDescriptor();
+  if (descriptor.id !== api.CARD_ID || descriptor.id !== "@tianyulinfeng1/dsh-plugin-deepseek-chat:card") fail("卡片 id 不对：" + descriptor.id);
+  else if (descriptor.order !== 60) fail("卡片 order 不对：" + descriptor.order);
+  else if (descriptor.title() !== "DeepSeek 聊天") fail("卡片默认名不对：" + descriptor.title());
+  else if (descriptor.component !== api.CardView) fail("卡片 component 不是 CardView");
+  else if (typeof descriptor.icon !== "function" || typeof descriptor.dedupeKey !== "function") fail("卡片缺少 icon/dedupeKey");
+  else ok("卡片 descriptor：id=" + descriptor.id + " / order=" + descriptor.order + " / 默认名=「DeepSeek 聊天」");
+
+  // 改名：title 是 thunk，无需重新注册；与顶栏名称独立。
+  api.writeConfig({ cardLabel: "侧边聊天" });
+  if (descriptor.title() !== "侧边聊天") fail("改名后 title thunk 没有返回新名字");
+  else if (api.tabLabel() !== "DeepSeek 聊天") fail("改卡片名误改了顶栏名称（两者应独立）");
+  else ok("卡片名称修改即时生效（title thunk 重求值，与顶栏名称独立）");
+  api.writeConfig({ cardLabel: "DeepSeek 聊天" });
+
+  // ③ better-sidebar 未运行、但 DSH 原生 registry 可用 → 原生直注（type + body 槽）。
+  const nativeCtx = makeCtx();
+  nativeCtx.sidebarRightTabs = makeNativeRegistry(nativeCtx);
+  moduleExports.apply(nativeCtx);
+  if (nativeCtx.cardRegistrations.length !== 0) fail("未运行 better-sidebar 时不应走 registerTab");
+  else if (nativeCtx.nativeRegistrations.length !== 1) fail("未运行 better-sidebar 时应注册 1 个原生 tab 类型，实际 " + nativeCtx.nativeRegistrations.length);
+  else if (countSlot(nativeCtx, "sidebar.right.pane.tab") !== 1) fail("原生直注缺少 sidebar.right.pane.tab 正文槽注册");
+  else ok("better-sidebar 未运行 → 走 DSH 原生右侧栏直注（tab 类型 + 正文槽）");
+
+  const nativeDef = api.nativeCardDefinition();
+  if (nativeDef.id !== api.CARD_ID || nativeDef.kind !== api.CARD_ID) fail("原生 tab 类型 id/kind 应等于 CARD_ID（避免冲突）");
+  else if (nativeDef.priority !== "extension" || nativeDef.keepMounted !== true) fail("原生 tab 类型 priority/keepMounted 不对");
+  else if (nativeDef.title() !== "DeepSeek 聊天") fail("原生 tab 类型 title() 默认名不对");
+  else if (!Array.isArray(nativeDef.guide) || nativeDef.guide.length !== 1 || nativeDef.guide[0].id !== api.CARD_ID + ":open") fail("原生 tab 类型 guide 入口不对");
+  else ok("原生 tab 类型契约正确（id/kind/priority/keepMounted/title thunk/guide 入口）");
+  api.writeConfig({ cardLabel: "原生聊天" });
+  if (nativeDef.title() !== "原生聊天") fail("原生 tab 类型 title thunk 未跟随改名");
+  else ok("原生路径改名即时生效（title thunk 重求值）");
+  api.writeConfig({ cardLabel: "DeepSeek 聊天" });
+
+  // 关闭 / 开启 showCard：原生路径也要能注销并重注册。
+  const nativeCheckbox = findByAttr(
+    mount(react.createElement(findSlot(nativeCtx, "settings.section").component, {})),
+    "data-dsh-plugin-deepseek-chat", "show-card");
+  nativeCheckbox.dispatch("change", { target: { checked: false } });
+  if (nativeCtx.nativeRegistrations.length !== 0 || countSlot(nativeCtx, "sidebar.right.pane.tab") !== 0) fail("关闭开关没有注销原生卡片");
+  else ok("关闭右边栏卡片开关 → 注销原生 tab 类型与正文槽");
+  api.writeConfig({ showCard: true });
+  if (nativeCtx.nativeRegistrations.length !== 1 || countSlot(nativeCtx, "sidebar.right.pane.tab") !== 1) fail("重新开启后原生卡片没有恢复");
+  else ok("重新开启右边栏卡片开关 → 重新原生直注");
+
+  // ④ 服务晚到：internal/service 事件把「原生卡片」换成「better-sidebar 卡片」。
+  if (!nativeCtx.serviceListeners.some((l) => l.name === "internal/service" && l.options?.global === true)) fail("未用 ctx.on('internal/service', ..., {global:true}) 监听服务就绪");
+  else ok("apply 通过 ctx.on('internal/service', {global:true}) 监听服务就绪（绕过 context filter）");
+  nativeCtx.betterSidebar = makeBetterSidebar(nativeCtx);
+  nativeCtx.emitService("betterSidebar");
+  if (nativeCtx.nativeRegistrations.length !== 0 || countSlot(nativeCtx, "sidebar.right.pane.tab") !== 0) fail("服务晚到后原生卡片未注销");
+  else if (nativeCtx.cardRegistrations.length !== 1) fail("服务晚到后未切换到 better-sidebar 卡片");
+  else ok("服务晚到：internal/service 事件自动把原生卡片切换为 better-sidebar 卡片（无需手动开关）");
+
+  // ⑤ 无界兜底 timer：超过 v1.1.8 的 40 次（20 秒）上限仍继续，服务到位即注册。
+  resetTimers();
+  const lateCtx = makeCtx();
+  moduleExports.apply(lateCtx);                 // 两个服务都缺席
+  if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("服务晚到：apply() 应排 1 个就绪探测 timer");
+  const firedBeyond = fireTimers(api.CARD_RETRY_DELAY, 50);   // 故意 > 40
+  if (firedBeyond <= 40) fail("就绪探测仍有硬上限（只跑了 " + firedBeyond + " 轮），v1.1.8 的 20 秒窗口 bug 未根治");
+  else if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("越过 40 轮后没有继续排队就绪探测");
+  else ok("就绪探测无硬上限：连续推进 " + firedBeyond + " 轮仍持续排队（根治 20 秒窗口过期）");
   lateCtx.betterSidebar = makeBetterSidebar(lateCtx);
-  const firedLate = fireTimers(api.CARD_RETRY_DELAY);
-  if (lateCtx.cardRegistrations.length !== 1) fail("服务晚到：推进重试后仍未注册卡片（fired=" + firedLate + "，v1.1.7 会永久缺失）");
-  else ok("服务晚到：推进就绪重试后自动 registerTab，右边栏卡片出现");
-  for (const cleanup of lateCtx.effectCleanups) cleanup();
-  if (lateCtx.cardRegistrations.length !== 0) fail("服务晚到用例的 effect cleanup 没有注销卡片");
-  else ok("服务晚到：effect cleanup 注销卡片");
+  fireTimers(api.CARD_RETRY_DELAY);
+  if (lateCtx.cardRegistrations.length !== 1) fail("兜底 timer 推进后服务到位仍没注册卡片");
+  else ok("服务晚到：兜底 timer 在服务到位后自动 registerTab（手动开关救回的场景被根治）");
 
-  // 卸载时 pending 重试 timer 必须被取消（不留孤儿 timer）。
+  // ⑥ cleanup：注销卡片、取消 timer、移除服务监听，三者都不留孤儿。
   resetTimers();
   const cleanupCtx = makeCtx();
+  cleanupCtx.sidebarRightTabs = makeNativeRegistry(cleanupCtx);
   moduleExports.apply(cleanupCtx);
-  if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("卸载前应有 1 个 pending 就绪重试 timer");
   for (const cleanup of cleanupCtx.effectCleanups) cleanup();
-  if (countTimers(api.CARD_RETRY_DELAY) !== 0) fail("ctx.effect cleanup 没有取消 pending 就绪重试 timer");
-  else ok("ctx.effect 卸载清理取消 pending 就绪重试 timer（无孤儿 timer）");
+  if (cleanupCtx.nativeRegistrations.length !== 0 || countSlot(cleanupCtx, "sidebar.right.pane.tab") !== 0) fail("effect cleanup 没有注销原生卡片");
+  else if (cleanupCtx.serviceListeners.length !== 0) fail("effect cleanup 没有移除 internal/service 监听");
+  else ok("ctx.effect 卸载清理：注销卡片 + 移除服务监听（无孤儿）");
+  const orphanCtx = makeCtx();
+  moduleExports.apply(orphanCtx);
+  if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("卸载前应有 1 个 pending 就绪探测 timer");
+  for (const cleanup of orphanCtx.effectCleanups) cleanup();
+  if (countTimers(api.CARD_RETRY_DELAY) !== 0) fail("effect cleanup 没有取消 pending 就绪探测 timer");
+  else ok("ctx.effect 卸载清理取消 pending 就绪探测 timer（无孤儿 timer）");
 
-  // 服务始终缺席：重试必须有上限，不能无限排队。
-  resetTimers();
-  const neverCtx = makeCtx();
-  moduleExports.apply(neverCtx);
-  const firedNever = fireTimers(api.CARD_RETRY_DELAY, api.CARD_RETRY_MAX + 10);
-  if (firedNever > api.CARD_RETRY_MAX) fail("就绪重试没有上限：fired=" + firedNever + " > " + api.CARD_RETRY_MAX);
-  else if (neverCtx.cardRegistrations.length !== 0) fail("服务始终缺席却注册了右边栏卡片");
-  else ok("服务始终缺席：就绪重试用尽上限即停止（fired=" + firedNever + " <= " + api.CARD_RETRY_MAX + "），零卡片");
-  for (const cleanup of neverCtx.effectCleanups) cleanup();
   resetTimers();
   storage.clear();
 }
@@ -903,6 +967,85 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   }
   api.resetUpdateState();
   fetchHandler = async () => { throw new Error("桩未配置"); };
+}
+
+// ── 一键更新（v1.1.10）：真调 pluginManager.updateBundle + 失败/需重启如实提示 ──
+{
+  const updateCalls = [];
+  let updateApplication = "applied";
+  let updateError = void 0;
+  const fakeRemote = {
+    pluginManager: {
+      async updateBundle(name, version) {
+        updateCalls.push([name, version]);
+        return { result: { application: updateApplication, error: updateError } };
+      }
+    }
+  };
+  const ctx = makeCtx({ remote: fakeRemote });
+  moduleExports.apply(ctx);
+  const slot = findSlot(ctx, "settings.section");
+  if (!slot) fail("一键更新：带 remote 的 ctx 没有注册设置页");
+  else {
+    // 只有「发现新版本」才在结果区（红框位置）出现「立即更新」按钮。
+    api.resetUpdateState();
+    const idleForm = mount(react.createElement(slot.component, {}));
+    if (findByAttr(idleForm, "data-dsh-plugin-deepseek-chat", "update-now")) fail("idle 状态不应出现「立即更新」按钮");
+    else ok("idle / 已是最新时不显示「立即更新」按钮");
+
+    api.setUpdateState({ status: "found", latest: "9.9.9", source: "npm" });
+    const foundForm = mount(react.createElement(slot.component, {}));
+    const nowButton = findByAttr(foundForm, "data-dsh-plugin-deepseek-chat", "update-now");
+    if (!nowButton) fail("发现新版本后没有出现「立即更新」按钮");
+    else {
+      ok("发现新版本后结果区出现「立即更新」按钮");
+      updateCalls.length = 0;
+      updateApplication = "applied";
+      updateError = void 0;
+      nowButton.dispatch("click", {});
+      await settle();
+      if (updateCalls.length !== 1) fail(`点击没有真调 updateBundle，实际 ${updateCalls.length} 次`);
+      else if (updateCalls[0][0] !== api.PLUGIN_NAME || updateCalls[0][1] !== "9.9.9") fail(`updateBundle 参数不对：${JSON.stringify(updateCalls[0])}`);
+      else if (api.getUpdateState().status !== "updated") fail(`applied 应转到 updated，实际 ${api.getUpdateState().status}`);
+      else ok("点击真调 pluginManager.updateBundle(包名, 9.9.9)，applied -> 更新完成");
+    }
+
+    // restart-required -> 如实提示重启 DSH。
+    updateApplication = "restart-required";
+    updateError = void 0;
+    api.setUpdateState({ status: "found", latest: "9.9.9" });
+    const form2 = mount(react.createElement(slot.component, {}));
+    findByAttr(form2, "data-dsh-plugin-deepseek-chat", "update-now")?.dispatch("click", {});
+    await settle();
+    if (api.getUpdateState().status !== "restart-required") fail("restart-required 没有如实提示重启");
+    else ok("restart-required -> 提示「已安装，请重启 DSH 生效」");
+
+    // failed（本机 link: 安装被 updateRefusal 拒，error 是 {code, diagnostic} 无 message）。
+    updateApplication = "failed";
+    updateError = { code: "invalid-spec", diagnostic: "installed neither from a registry under its own name nor from a Git commit" };
+    api.setUpdateState({ status: "found", latest: "9.9.9" });
+    const form3 = mount(react.createElement(slot.component, {}));
+    findByAttr(form3, "data-dsh-plugin-deepseek-chat", "update-now")?.dispatch("click", {});
+    await settle();
+    const failedState = api.getUpdateState();
+    if (failedState.status !== "update-failed" || !String(failedState.reason).includes("registry")) fail(`link: 被拒没有如实显示原因：${JSON.stringify(failedState)}`);
+    else ok("link: 安装被拒 -> update-failed 且如实显示 error.diagnostic 原因");
+
+    // 更新失败后结果区仍保留 npm / GitHub 兜底跳转链接。
+    const form4 = mount(react.createElement(slot.component, {}));
+    const status4 = findByAttr(form4, "data-dsh-plugin-deepseek-chat", "update-status");
+    const links4 = status4 ? collectElements(status4).filter((el) => el.tag === "a") : [];
+    if (links4.length !== 2) fail(`更新失败后结果区应有 2 个兜底跳转链接，实际 ${links4.length}`);
+    else ok("更新失败后仍保留 npm / GitHub 兜底跳转链接");
+  }
+
+  // 无 remote 通道 -> 如实提示（不抛错、不假装成功）。
+  api.setUpdateState({ status: "idle" });
+  await api.runUpdate(makeCtx(), "9.9.9", () => {});
+  const bare = api.getUpdateState();
+  if (bare.status !== "update-failed" || !String(bare.reason).includes("无法调用")) fail(`无 remote 通道时没有如实提示：${JSON.stringify(bare)}`);
+  else ok("无 remote 通道 -> 提示「当前环境无法调用插件更新通道」");
+  api.resetUpdateState();
 }
 
 // ── 图3 铺满浮层：conversation.view 用绝对定位 overlay 盖住 composer ──────

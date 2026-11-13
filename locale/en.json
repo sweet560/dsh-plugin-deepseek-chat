@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DeepSeek Chat",
-    "description": "Adds a chat.deepseek.com panel to the sidebar, a configurable conversation-header tab (default \"DeepSeek Chat\"), and an optional right-sidebar card registered through dsh-better-sidebar when installed (default \"DeepSeek Chat\", independently toggleable and renameable): fills the whole conversation area, remembers the last conversation, keeps a stable login session, and offers a settings page to toggle/rename both surfaces, show plugin metadata (version, author, description, license, npm/GitHub links), and check for updates against npm/GitHub — pure web chat with no account status strip."
+    "description": "Adds a chat.deepseek.com panel to the sidebar, a configurable conversation-header tab (default \"DeepSeek Chat\"), and a right-sidebar card that registers through better-sidebar when its service is running or injects directly into DSH native right sidebar otherwise (default \"DeepSeek Chat\", independently toggleable and renameable): fills the whole conversation area, remembers the last conversation, keeps a stable login session, and offers a settings page to toggle/rename both surfaces, show plugin metadata (version, author, description, license, npm/GitHub links), check for updates against npm/GitHub, and — when a new version is found — show an \"Update now\" button that really calls the official DSH Host channel pluginManager.updateBundle for a one-click update with honest success / restart / failure states — pure web chat with no account status strip."
   }
 }

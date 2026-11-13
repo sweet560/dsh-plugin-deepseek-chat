@@ -2,7 +2,7 @@
 
 [English](README.en.md) | 中文
 
-> **当前版本：v1.1.8** ｜适配 DSH **0.2.2-rc.2**
+> **当前版本：v1.1.10** ｜适配 DSH **0.2.2-rc.2**
 
 在 **DeepSeek Harness（DSH）桌面版**加入 **DeepSeek 聊天**：左侧栏图标入口、会话顶栏标签页（默认名「DeepSeek 聊天」，可在设置页开关 / 自定义），以及通过 **dsh-better-sidebar**（若已安装）注册的**右边栏卡片**（默认名「DeepSeek 聊天」，独立开关 / 自定义），点开后 `chat.deepseek.com` 铺满会话区，记住上次所在的会话；提供**设置页面**（含插件基础信息与「检查更新」按钮），面板为**纯网页聊天**，不显示账号状态。
 
@@ -19,15 +19,16 @@
 - **三个入口并存**：
   - 左侧栏图标入口，排在「插件」和「自动化任务」之间，点开后占满主内容区；
   - 会话顶栏标签行（「对话 / 轨迹 / 上下文 / 压缩 / 编队 / 统计」那一行）新增标签，通过官方 `conversation.view` 槽注册（`id: deepseek-chat-view`、`order: 100`），**默认显示名「DeepSeek 聊天」**；
-  - **右边栏卡片（v1.1.7）**：若已安装 `dsh-better-sidebar`，通过其 `ctx.betterSidebar.registerTab` 注册一张右边栏 Tab（`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`、`order: 60`、单实例），**默认显示名「DeepSeek 聊天」**、直接复用网页聊天 webview。这是**软依赖**：没装 better-sidebar 时静默跳过、其余入口照常，无需改依赖或注入声明。
+  - **右边栏卡片（v1.1.7；v1.1.9 双路径）**：在右侧栏注册一张卡片（`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`、`order: 60`、单实例），**默认显示名「DeepSeek 聊天」**、直接复用网页聊天 webview。这是**双路径（v1.1.9 起）**：只以 better-sidebar 是否「正常运行」为准，正常时经 `registerTab` 注册、否则（含未安装 / 启动晚）直注 DSH 自带原生右侧栏 `sidebarRightTabs`；两路径互斥、服务晚到自动切换，不再需要手动开关，无需改依赖或注入声明。
 - **设置页面（v1.1.4，v1.1.7 扩为四项）**：通过官方 `settings.section` 槽注册「DeepSeek 聊天」设置页（左侧「设置」弹窗导航里）。四项设置（顶栏标签与右边栏卡片彼此独立）：
   - **显示顶部标签栏**（默认开启）：关闭后移除顶栏标签，只保留左侧栏入口；
   - **顶部标签栏名称**（默认 `DeepSeek 聊天`）：输入框默认**空白**，以灰色占位提示显示默认名；点进去不用删、直接输入新名字即可，留空自动恢复默认，最长 40 字；
-  - **显示右边栏卡片**（v1.1.7，默认开启）：关闭后注销 better-sidebar 的 Tab 注册；
-  - **右边栏卡片名称**（v1.1.7，默认 `DeepSeek 聊天`）：同样是灰色占位提示、留空恢复默认、最长 40 字；`title` 用 thunk，改名即时生效，与顶栏名称互不影响。
+  - **显示右边栏卡片**（v1.1.7，默认开启）：关闭后注销当前路径的右边栏卡片（better-sidebar 或 DSH 原生右侧栏）；
+  - **右边栏卡片名称**（v1.1.7，v1.1.9 双路径，默认 `DeepSeek 聊天`）：同样是灰色占位提示、留空恢复默认、最长 40 字；`title` 用 thunk，改名即时生效，与顶栏名称互不影响。
   - 配置存 `localStorage` 的 `dsh-plugin-deepseek-chat:config`（`showTab` / `tabLabel` / `showCard` / `cardLabel` 四项），改完即时生效（标签行 / 卡片会注册或注销）。
 - **关于本插件（v1.1.5）**：设置页展示插件版本号、作者（`sweet560`）、功能简介、开源许可证（`MIT`），以及 npm 插件页面 / GitHub 仓库两个 `https` 外链（点开由桌面壳用系统浏览器打开）。
 - **检查更新（v1.1.5）**：设置页新增「检查更新」按钮，从 **npm 优先、GitHub 兜底** 两个公开 JSON 接口读取最新发布版本号（npm `dist-tags.latest`、`raw.githubusercontent.com` 上的 `package.json`），按数字逐段比较版本：已是最新 / 发现新版本 / 检查失败都给出文字状态，并附 npm / GitHub 跳转链接。检查中禁用重复点击，网络不可用或两源都失败都有兜底，不新增 Host 路由。
+- **一键更新（v1.1.10）**：与「检查更新」集成——只有**发现新版本**时，结果区（截图红框位置）才出现「立即更新」按钮；点击后真调用 DSH Host 官方通道 `pluginManager.updateBundle(包名, 新版本)` 自动替换组合包，并按返回结果用中文如实显示「更新完成 / 已安装请重启 DSH 生效 / 更新失败：<原因>」。`remote` 用 `ctx.get` 软读、不写进 `inject`（避免冷启动把整个插件 park）；本机 `link:` 本地安装会被官方 `updateRefusal` 拒绝，此时如实提示并保留 npm / GitHub 手动更新跳转链接。
 - **图3 修复：网页铺满会话区（v1.1.4）**：选中顶栏标签时，网页现在撑满整个会话区、盖住 DSH 自己的对话消息与底部输入框；切回「对话」标签即恢复。顶栏入口用不透明绝对定位浮层（`inset: 0`、`z-index: 50`）覆盖会话 body，header 里的标签行仍在上方、随时可点回。
 - 两个入口**共用同一个网页聊天组件**（顶栏多一层铺满浮层包装）和同一个固定分区 `panel:deepseek-chat`，登录态与会话记忆通用；切走标签页会释放租约、再进入重新申请同一分区。
 - 会话区全宽内嵌 `https://chat.deepseek.com/`（Electron `<webview>`，走桌面壳的 guest 租约桥 `window.dshDesktop.browser`）。
@@ -50,7 +51,11 @@
 
 > **v1.1.7**：按 `dsh-better-sidebar` 原理新增右边栏卡片（软探测 `ctx.get('betterSidebar')` + `registerTab`、`title` thunk 即时改名、`ctx.effect` 持有 disposer），设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。
 
-> **v1.1.8（本版）**：修复右边栏卡片不出现的 bug——v1.1.7 在 `apply()` 里一次性 `ctx.get("betterSidebar")` 且不声明 `inject`，若 `dsh-better-sidebar` 的 `ctx.provide` 稍晚执行，Cordis 只唤醒声明过该服务的 fiber，软探测的插件永远不会被重试，卡片就注册不上（设置页「侧边栏内容」里也看不到）。v1.1.8 改为**每次重读服务 + 有上限、可取消的就绪重试**（浏览器全局 timer、`ctx.effect` 卸载时清理），服务晚到也能自动注册；未安装 better-sidebar 时其余功能照常。支持版本更新到 DSH **0.2.2-rc.2**。详见 [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md)。
+> **v1.1.8**：修复右边栏卡片不出现的 bug——v1.1.7 在 `apply()` 里一次性 `ctx.get("betterSidebar")` 且不声明 `inject`，若 `dsh-better-sidebar` 的 `ctx.provide` 稍晚执行，Cordis 只唤醒声明过该服务的 fiber，软探测的插件永远不会被重试，卡片就注册不上（设置页「侧边栏内容」里也看不到）。v1.1.8 改为**每次重读服务 + 有上限、可取消的就绪重试**（浏览器全局 timer、`ctx.effect` 卸载时清理），服务晚到也能自动注册；未安装 better-sidebar 时其余功能照常。支持版本更新到 DSH **0.2.2-rc.2**。详见 [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md)。
+
+> **v1.1.9**：修复「重启 DSH 后要到设置里手动关一次再开一次，右边栏卡片才出现」的 bug —— v1.1.8 的 20 秒有限就绪重试窗口会过期，而 better-sidebar 冷启动要等 Host 传输服务就绪才 `provide('betterSidebar')`，窗口耗尽后就不再重试，卡片一直注册不上。v1.1.9 改为**服务就绪事件 + 无界可取消兜底 + 每次重读**，三层任一到位即注册、不再需要手动开关；并按你的想法改成**双路径**：只以 better-sidebar 是否「正常运行」为准，正常走 `registerTab`，不正常（含未安装 / 启动晚）走 DSH 自带原生右侧栏 `sidebarRightTabs` 直注，两路径互斥、服务晚到自动切换。详见 [docs/RELEASE_NOTES_v1.1.9.md](docs/RELEASE_NOTES_v1.1.9.md)。
+
+> **v1.1.10（本版）**：设置页「检查更新」发现新版本后，在结果区（截图红框位置）新增「立即更新」按钮，点击真调 DSH Host 官方 `pluginManager.updateBundle` 一键替换组合包；按返回状态用中文如实提示「更新完成 / 已安装请重启 DSH 生效 / 更新失败：<原因>」，`remote` 走 `ctx.get` 软读、不写进 `inject`；本机 `link:` 安装被官方拒绝时如实说明并保留 npm / GitHub 手动更新链接。详见 [docs/RELEASE_NOTES_v1.1.10.md](docs/RELEASE_NOTES_v1.1.10.md)。
 
 ## 环境要求
 
@@ -172,6 +177,8 @@ DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-
 
 | 版本 | 内容 |
 |---|---|
+| **1.1.10** | **设置页「一键更新」**：与「检查更新」集成，只有发现新版本时结果区才出现「立即更新」按钮；点击真调 Host 官方 `pluginManager.updateBundle(包名, 版本)`，按 `ChangeResult.application` 用中文如实提示更新完成 / 需重启 / 失败原因，`remote` 走 `ctx.get` 软读不写进 `inject`，本机 `link:` 安装被拒时保留 npm / GitHub 手动更新跳转链接。离线自检新增「found 才出按钮 / 真调 updateBundle 且参数正确 / applied / restart-required / link: 被拒如实提示 / 无通道 / 兜底链接」断言，全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.10.md](docs/RELEASE_NOTES_v1.1.10.md)。 |
+| **1.1.9** | **修复重启后需手动开关才出卡片 + 右边栏卡片双路径**：v1.1.8 的「500ms×40≈20 秒」有限重试窗口会过期（better-sidebar 冷启动要等 `remote` / `remote.session` / `connection` 等 Host 服务就绪、fiber 才 active、`ctx.provide('betterSidebar')` 才发生），窗口耗尽后不再注册——这就是每次重启都要手动关一次再开一次的原因。v1.1.9 改为 `ctx.on('internal/service', {global:true})` 服务就绪事件 + 无界可取消 500ms 兜底 + 每次 sync 重读，三层任一到位即注册；并按用户要求改为**双路径**：只以 `ctx.get('betterSidebar')` 是否可用（「正常运行」）为准，可用走 better-sidebar `registerTab`，不可用（含未装 / 启动晚）走 DSH 原生 `sidebarRightTabs` 直注（type + `sidebar.right.pane.tab` 正文槽），两路径互斥、服务晚到自动切换。离线自检新增「两服务全缺席 / 互斥 / 原生直注契约 / 事件切换 / 无界 timer / cleanup」断言，全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.9.md](docs/RELEASE_NOTES_v1.1.9.md)。 |
 | **1.1.8** | **修复右边栏卡片不出现的加载顺序竞态 + 支持 DSH 0.2.2-rc.2**：v1.1.7 在 `apply()` 里一次性 `ctx.get("betterSidebar")` 且不声明 `inject`，若 `dsh-better-sidebar` 的 `ctx.provide` 稍晚，Cordis 只唤醒声明过该服务的 fiber，软探测的插件永远不会被重试，卡片就注册不上（设置页「侧边栏内容」里也看不到）。v1.1.8 改为**每次重读服务 + 有上限、可取消的就绪重试**（浏览器全局 timer，`ctx.effect` 卸载时清理），服务晚到也能自动 `registerTab`；未安装 better-sidebar 时其余功能照常。支持版本标注更新到 DSH `0.2.2-rc.2`（崩溃日志原文与旧发布说明保留 rc.1）。离线自检新增「服务晚到也能注册 / 重试有上限 / cleanup 取消 timer」断言，全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md)。 |
 | **1.1.7** | **新增右边栏卡片（dsh-better-sidebar）**：`ctx.get('betterSidebar')` 软探测 + `registerTab`（`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`、`order: 60`、复用网页聊天 webview），`title` thunk 即时改名、`ctx.effect` 持有 disposer；设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。离线自检全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。 |
 | **1.1.6** | **OIDC 可信发布链路测试**：`.github/workflows/publish.yml` 启用 `permissions.id-token: write`、Node 24（Active LTS）、`npm@latest`、`npm publish --provenance`，移除 `NODE_AUTH_TOKEN` 与 `environment` 声明；版本号升到 `1.1.6` 推送 GitHub，实测 GitHub Actions 能否经 npm Trusted Publisher 自动发布。功能与 1.1.5 相同，仅发布链路变更。 |
@@ -191,13 +198,13 @@ cd dsh-plugin-deepseek-chat
 node test/check-client.mjs
 ```
 
-`test/check-client.mjs` 是离线自检：在 `node:vm` 里加载 `lib/client.js`，用假的 React/DOM/租约桥验证四处槽位注册（左侧栏 / 全屏主面板 / 顶栏标签页 / 设置页）、**better-sidebar 软探测**（未装时静默跳过、已装时注册一张右边栏卡片、title thunk 改名、开关注销/重注册、effect cleanup 注销）、配置层（四项默认值、类型校验、持久化、订阅通知、动态重注入）、顶栏浮层的铺满样式、工厂 id 与包名一致、Web 表层 inert、两入口共用固定分区、纯网页聊天无账号条、URL 白名单、会话记忆、租约释放、弹窗白名单和崩溃隔离；并用 mock fetch 验证基础信息常量与 `package.json` 一致、语义版本比较、更新载荷解析、npm/GitHub 兜底、检查更新各状态分支与设置页点击联动。
+`test/check-client.mjs` 是离线自检：在 `node:vm` 里加载 `lib/client.js`，用假的 React/DOM/租约桥验证四处槽位注册（左侧栏 / 全屏主面板 / 顶栏标签页 / 设置页）、**右边栏卡片双路径**（better-sidebar 服务正常运行时走 `registerTab`、否则走 DSH 原生 `sidebarRightTabs` 直注；两服务全缺席零卡片、两路径互斥、`internal/service` 服务晚到事件自动切换路径、无界可取消兜底 timer、title thunk 改名、开关注销/重注册、effect cleanup 注销并移除监听/取消 timer）、配置层（四项默认值、类型校验、持久化、订阅通知、动态重注入）、顶栏浮层的铺满样式、工厂 id 与包名一致、Web 表层 inert、两入口共用固定分区、纯网页聊天无账号条、URL 白名单、会话记忆、租约释放、弹窗白名单和崩溃隔离；并用 mock fetch 验证基础信息常量与 `package.json` 一致、语义版本比较、更新载荷解析、npm/GitHub 兜底、检查更新各状态分支与设置页点击联动，并用 fake pluginManager.updateBundle 验证一键更新的真调用、成功 / 需重启 / 失败各状态与兜底链接。
 
 目录：
 
 ```
 lib/index.js           宿主半侧（空实现，只为让 client bundle 有 Loader 入口）
-lib/client.js          浏览器半侧：入口、网页聊天面板、顶栏铺满浮层、右边栏卡片（better-sidebar 软探测）、设置页与配置层、关于信息/检查更新、webview 生命周期、崩溃隔离
+lib/client.js          浏览器半侧：入口、网页聊天面板、顶栏铺满浮层、右边栏卡片（双路径：better-sidebar / DSH 原生直注）、设置页与配置层、关于信息/检查更新/一键更新、webview 生命周期、崩溃隔离
 cordis.patch.yml       bundle 补丁：插入本插件的 Loader 行
 locale/zh.json         插件页显示名称/描述（中文）
 locale/en.json         插件页显示名称/描述（英文）
