@@ -1,4 +1,4 @@
-// dsh-plugin-deepseek-chat 客户端包离线自检（v1.1.10）。
+// dsh-plugin-deepseek-chat 客户端包离线自检（v1.2.2）。
 //
 // 这个包是浏览器 ModuleLoader 脚本，因此自检：
 //   1. 在 vm 里执行它，捕获 __ModuleLoader__.load 的注册；
@@ -866,15 +866,15 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   storage.clear();
 }
 
-// ── 设置页渲染：关于本插件基础信息 + 检查更新按钮 + 三组卡片边框 ─────────
+// ── 设置页渲染：关于本插件基础信息 + 检查更新按钮 + 四组卡片边框 ─────────
 {
   api.resetUpdateState();
   const form = mount(react.createElement(settingsSlot.component, {}));
 
-  // 三组卡片边框（v1.1.7 美化）：按逻辑分组、用主题令牌细边框/圆角/浅底。
+  // 四组卡片边框（v1.2.0 增加自动闭环）：按逻辑分组、用主题令牌细边框/圆角/浅底。
   const cards = collectElements(form).filter((el) =>
     el.getAttribute("data-dsh-plugin-deepseek-chat") === "settings-card");
-  if (cards.length !== 3) fail(`设置页应有 3 张分组卡片，实际 ${cards.length}`);
+  if (cards.length !== 4) fail(`设置页应有 4 张分组卡片，实际 ${cards.length}`);
   else {
     const expected = {
       border: ".5px solid var(--dsw-alias-border-l3)",
@@ -1345,6 +1345,627 @@ storage.clear();
   else ok("左侧栏面板 ↔ 顶栏标签页切换复用同一分区（登录态保留）");
   for (const cleanup of second.cleanups) cleanup();
   await flushMicrotasks();
+}
+
+// ── v1.2.0 条件触发式自动闭环：离线验证两条通道与三道安全阀 ───────────────
+{
+  // A. 默认关闭 + 配置归一化（安全阀①的一半：总开关默认 false）。
+  if (api.DEFAULTS.autoSyncEnabled !== false) fail("autoSyncEnabled 默认必须为 false（绝不自动启动）");
+  else ok("安全阀①：autoSyncEnabled 默认关闭、闭环默认不启动");
+  if (api.DEFAULTS.maxAutoLoops !== api.DEFAULT_MAX_LOOPS ||
+      !Array.isArray(api.DEFAULTS.errorKeywords) ||
+      !Array.isArray(api.DEFAULTS.stopButtonSelectors) ||
+      !Array.isArray(api.DEFAULTS.sendButtonSelectors) ||
+      !Array.isArray(api.DEFAULTS.textareaSelectors) ||
+      !Array.isArray(api.DEFAULTS.assistantSelectors)) {
+    fail("DEFAULTS 缺少 v1.2.0 闭环字段");
+  } else ok("DEFAULTS 含 maxAutoLoops / errorKeywords / 4 组可配置选择器");
+  if (api.normalizeMaxLoops(0) !== 1 || api.normalizeMaxLoops(99) !== 20 ||
+      api.normalizeMaxLoops(3.7) !== 4 || api.normalizeMaxLoops("x") !== api.DEFAULT_MAX_LOOPS) {
+    fail("normalizeMaxLoops 没有把轮数 clamp 到 [1,20]");
+  } else ok("normalizeMaxLoops 把轮数夹到 [1,20]、非法值回退默认 3");
+  if (api.normalizeSelectors(["  .a  ", "", 5, ".b"], [".z"]).join(",") !== ".a,.b") fail("normalizeSelectors 没过滤空/非字符串项");
+  else ok("可配置选择器：去空白、过滤空项与非字符串，空列表回退默认");
+
+  // readConfig 直接读 storage（不触发订阅者），验证新字段的类型校验与归一化。
+  storage.set(api.CONFIG_KEY, JSON.stringify({
+    autoSyncEnabled: true, maxAutoLoops: 99, errorKeywords: ["BOOM"],
+    stopButtonSelectors: [" .my-stop "]
+  }));
+  const rc = api.readConfig();
+  if (rc.autoSyncEnabled !== true || rc.maxAutoLoops !== 20 ||
+      rc.errorKeywords.join(",") !== "BOOM" || rc.stopButtonSelectors.join(",") !== ".my-stop") {
+    fail("readConfig 没有按类型读取/归一化 v1.2.0 字段");
+  } else ok("readConfig 读取 autoSyncEnabled / maxAutoLoops / errorKeywords / 选择器并归一化");
+  storage.clear();
+  // writeConfig 持久化新字段（不动总开关，避免触发服务订阅副作用）。
+  api.writeConfig({ maxAutoLoops: 5, errorKeywords: ["BOOM"] });
+  const persisted = JSON.parse(storage.get(api.CONFIG_KEY) ?? "{}");
+  if (persisted.maxAutoLoops !== 5 || persisted.errorKeywords?.join(",") !== "BOOM") fail("writeConfig 没持久化 v1.2.0 字段");
+  else ok("writeConfig 把 maxAutoLoops / errorKeywords 持久化到 localStorage");
+  api.writeConfig({ maxAutoLoops: api.DEFAULT_MAX_LOOPS, errorKeywords: [...api.DEFAULT_ERROR_KEYWORDS] });
+  storage.clear();
+
+  // B. 文本提取：assistant/message.content 是 block 数组，兼容 type / kind 两种字段名。
+  if (api.extractContentText("纯字符串") !== "纯字符串") fail("extractContentText 没处理字符串内容");
+  const blocks = [{ type: "text", text: "A" }, { kind: "text", text: "B" }, { type: "image", url: "x" }];
+  if (api.extractContentText(blocks) !== "AB") fail("extractContentText 没兼容 block.type / block.kind");
+  else ok("extractContentText 兼容官方 eventProjection(kind) 与 system-prompt(type) 两种文本块");
+  if (api.eventAnswerText({ data: { message: { content: blocks } } }) !== "AB") fail("eventAnswerText 没取到 message.content");
+  else ok("eventAnswerText 从 assistant/message 事件取 message.content");
+  if (!api.containsErrorKeyword("Traceback (most recent call last)", ["Error", "Traceback"]) ||
+      api.containsErrorKeyword("一切正常", ["Error", "Traceback"])) fail("错误关键词熔断判断错");
+  else ok("安全阀②：错误关键词命中/未命中判断正确（大小写敏感）");
+  const snapForText = { entries: [
+    { type: "assistant/message", data: { turn: 1, message: { content: [{ type: "text", text: "旧回答" }] } } },
+    { type: "assistant/message", data: { turn: 2, message: { content: [{ kind: "text", text: "本轮回答" }] } } }
+  ] };
+  if (api.collectAnswerText(snapForText, 2) !== "本轮回答") fail("collectAnswerText 没按 turn 取本轮回答");
+  else ok("collectAnswerText 从 eventSource 窗口按 turn 精确取本轮 assistant 文本");
+
+  // C. 页面桥：字符串是合法 JS；在模拟 DOM 里真正跑通「填入+发送」与「停止按钮消失→抓取」。
+  let compileErr = null;
+  try { new Function("return (" + api.BRIDGE_IMPL + ")"); } catch (e) { compileErr = e; }
+  if (compileErr) fail(`BRIDGE_IMPL 不是合法可注入脚本：${compileErr.message}`);
+  else ok("页面桥是纯字符串常量（无模板插值），可安全嵌入 webview.executeJavaScript");
+  const cfg = api.buildBridgeConfig();
+  if (!cfg.stopButtonSelectors?.length || !cfg.sendButtonSelectors?.length ||
+      !cfg.textareaSelectors?.length || !cfg.assistantSelectors?.length || cfg.replyTimeout !== api.DEFAULT_REPLY_TIMEOUT) {
+    fail("buildBridgeConfig 没把可配置选择器/超时转给页面桥");
+  } else ok("buildBridgeConfig 把 4 组可配置选择器 + 回复超时传给 guest 页面桥");
+  const ensureExpr = api.ensureBridgeExpression(cfg);
+  if (!ensureExpr.includes(api.BRIDGE_KEY) || !ensureExpr.includes("__v!==3")) fail("ensureBridgeExpression 没有自愈重装判断");
+  else ok("ensureBridgeExpression：guest 导航后按 __v!==3 自愈重装页面桥");
+  try {
+    new Function("return " + ensureExpr);
+    new Function("return " + api.bridgeSendExpression(cfg, '含"引号"与\n换行'));
+    new Function("return " + api.bridgePollExpression(cfg));
+  } catch (e) { fail(`桥表达式不是合法 JS：${e.message}`); }
+  ok("ensure/send/poll 三个 executeJavaScript 表达式语法合法、文本经 JSON.stringify 转义");
+
+  let stopEl = null;
+  let assistantNodes = [];
+  let sendClicks = 0, inputEvents = 0, changeEvents = 0;
+  const keyEvents = [];
+  let observerCb = null;
+  let boxValue = "";
+  const box = {
+    isContentEditable: false,
+    getAttribute: () => null,
+    dispatchEvent(ev) {
+      if (!ev) return;
+      if (ev.type === "input") inputEvents++;
+      else if (ev.type === "change") changeEvents++;
+      else if (ev.type === "keydown") keyEvents.push(ev);
+    }
+  };
+  const sendBtn = { disabled: false, click() { sendClicks++; } };
+  const textareaProto = {};
+  Object.defineProperty(textareaProto, "value", { configurable: true, get() { return boxValue; }, set(v) { boxValue = v; } });
+  const htmlProto = {};
+  Object.defineProperty(htmlProto, "innerHTML", { configurable: true, get() { return ""; }, set() {} });
+  const win = { HTMLTextAreaElement: { prototype: textareaProto }, HTMLElement: { prototype: htmlProto }, requestAnimationFrame: (f) => f() };
+  const doc = {
+    body: {},
+    querySelector(sel) {
+      if (cfg.textareaSelectors.includes(sel)) return box;
+      if (cfg.sendButtonSelectors.includes(sel)) return sendBtn;
+      if (cfg.stopButtonSelectors.includes(sel)) return stopEl;
+      return null;
+    },
+    querySelectorAll(sel) { return cfg.assistantSelectors.includes(sel) ? assistantNodes : []; }
+  };
+  class MO { constructor(cb) { observerCb = cb; } observe() {} disconnect() {} }
+  class Ev { constructor(type) { this.type = type; } }
+  class KeyEv { constructor(type, opts) { this.type = type; Object.assign(this, opts || {}); } }
+  const factory = new Function("window", "document", "MutationObserver", "Event", "KeyboardEvent",
+    "return (" + api.BRIDGE_IMPL + ")")(win, doc, MO, Ev, KeyEv);
+  const bridge = factory(cfg);
+  if (bridge.__v !== 3 || typeof bridge.fillAndSend !== "function" || typeof bridge.poll !== "function") {
+    fail("页面桥工厂没返回 __v:3 / fillAndSend / poll");
+  } else ok("页面桥工厂在 guest 主世界暴露 __v:3 / fillAndSend / poll / reset / arm");
+  const sendRes = bridge.fillAndSend("桌面端回答");
+  if (!sendRes.ok || boxValue !== "桌面端回答" || inputEvents < 1 || changeEvents < 1) {
+    fail("fillAndSend 没用原生 setter 写入并派发 input/change（React 受控发送按钮会 disabled）");
+  } else ok("通道 A：用 HTMLTextAreaElement 原生 value setter 写入 + input/change 事件，保证 React 受控更新");
+  if (sendClicks !== 1) fail(`通道 A：没点击发送按钮（sendClicks=${sendClicks}）`);
+  else ok("通道 A：同步立即点击发送按钮（v1.2.2 不再依赖 requestAnimationFrame，隐藏 webview 也能触发）");
+  stopEl = { disabled: false };
+  if (observerCb) observerCb();               // 网页开始生成：停止按钮出现
+  assistantNodes = [{ innerText: "网页回复内容" }];
+  stopEl = null;
+  if (observerCb) observerCb();               // 网页生成完成：停止按钮消失
+  const pollSnap = bridge.poll();
+  if (pollSnap.phase !== "done" || pollSnap.text !== "网页回复内容") {
+    fail(`通道 B：停止按钮消失后没抓到网页回复：${JSON.stringify(pollSnap)}`);
+  } else ok("通道 B：MutationObserver 检测停止按钮 有→无，抓取最后一条 assistant 文本并判完成");
+
+  // D. 状态机：三道安全阀全部离线验证。
+  let cfgCtl = { ...api.DEFAULTS, autoSyncEnabled: true, maxAutoLoops: 2 };
+  const ctl = api.createSyncController({ getConfig: () => cfgCtl });
+  cfgCtl = { ...cfgCtl, autoSyncEnabled: false };
+  let d = ctl.handleTurnEnd({ sessionId: "s", turn: 1, reasonKind: "completed", answerText: "ok" });
+  if (d.action !== "skip" || d.reason !== "disabled") fail("总开关关闭时仍触发了自动回传");
+  else ok("安全阀①：autoSyncEnabled=false 时 TurnEnd 直接 skip（disabled）");
+  cfgCtl = { ...cfgCtl, autoSyncEnabled: true };
+  ctl.reset(); ctl.refresh();
+  d = ctl.handleTurnEnd({ sessionId: "s", turn: 2, reasonKind: "error", answerText: "boom" });
+  if (d.action !== "skip" || d.reason !== "turn-not-completed") fail("非 completed 轮次没被跳过");
+  else ok("只有 reason.kind=completed/max-tokens 的成功轮次才回传（error/aborted/blocked 跳过）");
+  d = ctl.handleTurnEnd({ sessionId: "s", turn: 3, reasonKind: "completed", answerText: "Traceback ..." });
+  if (d.action !== "pause" || d.reason !== "error-keyword") fail("错误关键词没熔断");
+  else ok("安全阀②：lastAnswer 命中错误关键词 → paused(error-keyword)，不自动回传");
+  ctl.reset(); ctl.refresh();
+  d = ctl.handleTurnEnd({ sessionId: "s", turn: 4, reasonKind: "completed", answerText: "正常回答" });
+  if (d.action !== "push" || d.text !== "正常回答" || ctl.getState().loopCount !== 1) fail("正常轮次没进入 push");
+  else ok("正常轮次：handleTurnEnd → push（loopCount+1，进入 pushing）");
+  d = ctl.handleTurnEnd({ sessionId: "s", turn: 4, reasonKind: "completed", answerText: "正常回答" });
+  if (d.action !== "skip" || d.reason !== "busy") fail("同轮重复 TurnEnd 没被 busy 挡住");
+  else ok("pushing/waiting 期间的重复 TurnEnd 被 busy 忽略（防并发回传）");
+  ctl.notePushed();
+  ctl.noteReply("网页回复");
+  const stAfter = ctl.getState();
+  if (stAfter.state !== "injected" || stAfter.lastReply !== "网页回复") fail("noteReply 没进入 injected / 未保存回复");
+  else ok("网页回复完成 → noteReply：state=injected 且保存 lastReply（等用户判定继续）");
+  ctl.acknowledge();
+  cfgCtl = { ...cfgCtl, maxAutoLoops: 1 };
+  ctl.reset(); ctl.refresh();
+  d = ctl.handleTurnEnd({ sessionId: "s", turn: 10, reasonKind: "completed", answerText: "回答1" });
+  ctl.noteError("reset-to-idle"); ctl.refresh();
+  d = ctl.handleTurnEnd({ sessionId: "s", turn: 11, reasonKind: "completed", answerText: "回答2" });
+  if (d.action !== "pause" || d.reason !== "max-loops") fail("maxAutoLoops 上限没熔断");
+  else ok("安全阀①：loopCount 达 maxAutoLoops 上限 → paused(max-loops)，停止自动循环");
+  cfgCtl = { ...cfgCtl, maxAutoLoops: 3 };
+  ctl.reset(); ctl.refresh();
+  d = ctl.handleTurnEnd({ sessionId: "s", turn: 20, reasonKind: "completed", answerText: "回答" });
+  ctl.noteError("x"); ctl.refresh();
+  d = ctl.handleTurnEnd({ sessionId: "s", turn: 20, reasonKind: "completed", answerText: "回答" });
+  if (d.action !== "skip" || d.reason !== "duplicate") fail("安全阀③同轮去重没生效");
+  else ok("安全阀③：同一 sessionId+turn 的重复 TurnEnd 被去重忽略");
+
+  // E. 「注入但不执行」——只调 setDraft，绝不 submit。
+  let draft = "", submitted = false, injectedFlag;
+  const fakeRt = {
+    dockBinding: { current: { sessionId: "s", inputActions: { setDraft(t) { draft = t; }, submit() { submitted = true; } } } },
+    controller: { noteDraftInjected(okFlag) { injectedFlag = okFlag; } }
+  };
+  const injectedOk = api.injectDraft(fakeRt, "网页回复内容");
+  if (!injectedOk || draft !== "网页回复内容" || submitted || injectedFlag !== true) {
+    fail("injectDraft 没做到「写草稿但不提交」");
+  } else ok("通道 B：网页回复只写入桌面草稿 setDraft()，绝不调用 submit()（是否继续由用户决定）");
+
+  // F. turn/end 订阅：从 eventSource append 窗口读取 reason + 本轮 assistant 文本。
+  const decisions = [];
+  const rtEvents = { controller: { handleTurnEnd(e) { decisions.push(e); return { action: "skip", reason: "test" }; } } };
+  const windowSnap = {
+    entries: [
+      { type: "assistant/message", data: { turn: 7, message: { content: [{ kind: "text", text: "桌面回答A" }, { type: "text", text: "桌面回答B" }] } } },
+      { type: "turn/end", data: { turn: 7, reason: { kind: "completed" } } }
+    ],
+    change: { kind: "append", entries: [{ type: "turn/end", data: { turn: 7, reason: { kind: "completed" } } }] }
+  };
+  api.onSessionEvents(rtEvents, { getSnapshot: () => windowSnap }, "sess-7");
+  if (decisions.length !== 1 || decisions[0].sessionId !== "sess-7" || decisions[0].turn !== 7 ||
+      decisions[0].reasonKind !== "completed" || decisions[0].answerText !== "桌面回答A桌面回答B") {
+    fail(`turn/end 没正确解析：${JSON.stringify(decisions)}`);
+  } else ok("turn/end：从 eventSource append 窗口读 reason.kind=completed + 该轮 assistant 文本");
+  decisions.length = 0;
+  api.onSessionEvents(rtEvents, { getSnapshot: () => ({ ...windowSnap, change: { kind: "replace", entries: [] } }) }, "sess-7");
+  if (decisions.length !== 0) fail("replace/prepend 窗口也误触发了轮次回传");
+  else ok("只对 append 窗口处理（replace/prepend/settle-assistant 不误触发，避免正常浏览被抓取）");
+
+  // G. 状态条默认隐藏 + 设置页第 4 卡控件 + 总开关交互。
+  const bar = mount(react.createElement(api.SyncStatusBar, {}));
+  if (bar !== null) fail("autoSyncEnabled 默认 false 时状态条不该渲染");
+  else ok("安全阀①：默认关闭时状态条隐藏，闭环完全不启动");
+  const form4 = mount(react.createElement(settingsSlot.component, {}));
+  const need = ["sync-enable", "sync-max-loops", "sync-error-keywords", "sync-stop-selectors",
+    "sync-send-selectors", "sync-textarea-selectors", "sync-assistant-selectors"];
+  const missing = need.filter((v) => !findByAttr(form4, "data-dsh-plugin-deepseek-chat", v));
+  if (missing.length) fail("设置页缺少自动闭环控件：" + missing.join(","));
+  else ok("设置页第 4 卡：总开关 / 最大轮数 / 错误关键词 / 4 组可配置选择器齐全");
+  const sw = findByAttr(form4, "data-dsh-plugin-deepseek-chat", "sync-enable");
+  if (!sw || String(sw.getAttribute("checked")) !== "false") fail("总开关默认不该被勾选");
+  else ok("总开关默认未勾选（需用户在设置里手动开启）");
+  if (sw) {
+    sw.dispatch("change", { target: { checked: true } });
+    if (api.getConfig().autoSyncEnabled !== true) fail("设置页总开关 change 没写入配置");
+    else ok("设置页总开关 change → writeConfig(autoSyncEnabled)，用户可随时开启/关闭");
+    api.writeConfig({ autoSyncEnabled: false });
+  }
+  flushEffects();
+
+  // ── H. 端到端集成：把「真实运行单例 + webview.executeJavaScript 页面桥 +
+  //    conversation.composer.dock 订阅 + turn/end 事件 + 轮询 + setDraft 注入」串成一条链，
+  //    完整跑两轮闭环，并验证 maxAutoLoops 在真实接线下熔断、submit() 全程 0 次调用 ──
+  {
+    // 直接复用 C 段已建好的模拟 guest DOM（win/doc/MO/Ev/KeyEv/box/sendBtn …），只复位状态。
+    boxValue = "";
+    sendClicks = 0;
+    inputEvents = 0;
+    changeEvents = 0;
+    assistantNodes = [];
+    stopEl = null;
+    delete win.__dshDeepSeekBridge;
+
+    // webview.executeJavaScript 的真实语义：在 guest 主世界求值表达式，返回最后一个值。
+    const guestExecute = (expr) => new Function(
+      "window", "document", "MutationObserver", "Event", "KeyboardEvent",
+      "return (" + expr + ")"
+    )(win, doc, MO, Ev, KeyEv);
+
+    // 真正的运行单例（与 pushAnswerToWeb / startReplyPolling 共用同一个模块级对象）。
+    const e2eCtx = makeCtx();
+    const bindings = {};
+    const sessions = { binding: (id) => bindings[id] };
+    const originalGet = e2eCtx.get;
+    e2eCtx.get = (name) => (name === "sessions" ? sessions : originalGet(name));
+    const rt = api.ensureSyncRuntime(e2eCtx);
+
+    // 清掉前面 apply() 残留的 dock/桥/取消标记，由本段接管这个单例。
+    if (typeof rt.dockDispose === "function") { try { rt.dockDispose(); } catch { /* 已释放 */ } }
+    rt.dockDispose = null;
+    rt.cancelled = false;
+    rt.bridge = api.makeWebviewBridge({ executeJavaScript: guestExecute });
+
+    // 用户在设置页打开总开关（maxAutoLoops=2 便于跑两轮后触发上限）。
+    api.writeConfig({
+      autoSyncEnabled: true,
+      maxAutoLoops: 2,
+      errorKeywords: [...api.DEFAULT_ERROR_KEYWORDS],
+      stopButtonSelectors: [...api.DEFAULT_STOP_SELECTORS],
+      sendButtonSelectors: [...api.DEFAULT_SEND_SELECTORS],
+      textareaSelectors: [...api.DEFAULT_TEXTAREA_SELECTORS],
+      assistantSelectors: [...api.DEFAULT_ASSISTANT_SELECTORS]
+    });
+    // writeConfig 会触发旧 apply() 注册的 sync 订阅，可能又挂了一个 dock；统一清掉。
+    if (typeof rt.dockDispose === "function") { try { rt.dockDispose(); } catch { /* 已释放 */ } }
+    rt.dockDispose = null;
+    rt.cancelled = false;
+    rt.bridge = api.makeWebviewBridge({ executeJavaScript: guestExecute });
+    rt.controller.reset();
+    rt.controller.refresh();
+
+    // 真实 dock 组件：捕获 inputActions + sessionId，useEffect 里订阅 eventSource。
+    let draftText = "", submitCalls = 0;
+    const inputActions = {
+      setDraft(t) { draftText = t; },
+      submit() { submitCalls += 1; }
+    };
+    let eventListener = null;
+    let currentWindow = { entries: [], change: { kind: "replace", entries: [] } };
+    const source = {
+      getSnapshot: () => currentWindow,
+      subscribe(cb) { eventListener = cb; return () => { eventListener = null; }; }
+    };
+    bindings["sess-e2e"] = { eventSource: source };
+
+    const fxBefore = effects.length;
+    mount(react.createElement(api.makeSyncDock(rt), { inputActions, sessionId: "sess-e2e" }));
+    const dockEffects = effects.splice(fxBefore);
+    let dockCleanup;
+    for (const fn of dockEffects) { const c = fn(); if (typeof c === "function") dockCleanup = c; }
+    if (!eventListener) fail("端到端：dock 没有通过 ctx.get('sessions') 订阅 eventSource");
+    else ok("端到端：makeSyncDock 软读 sessions.binding(id).eventSource.subscribe 成功接线");
+
+    /** 触发一轮：桌面 turn/end → 自动填入发送 → 网页生成完成 → 轮询抓回 → 注入草稿。 */
+    const fireTurn = async (turn, answerText, replyText) => {
+      currentWindow = {
+        entries: [
+          { type: "assistant/message", data: { turn, message: { content: [{ type: "text", text: answerText }] } } },
+          { type: "turn/end", data: { turn, reason: { kind: "completed" } } }
+        ],
+        change: { kind: "append", entries: [{ type: "turn/end", data: { turn, reason: { kind: "completed" } } }] }
+      };
+      eventListener();
+      await flushMicrotasks();
+      await flushMicrotasks();
+      // 网页开始生成（停止按钮出现）→ 生成完成（消失 + 新回复文本）。
+      stopEl = { disabled: false };
+      if (observerCb) observerCb();
+      assistantNodes = [{ innerText: replyText }];
+      stopEl = null;
+      if (observerCb) observerCb();
+      // 驱动真实 startReplyPolling 的浏览器全局 setTimeout 递归轮询。
+      for (let i = 0; i < 12 && rt.controller.getState().state === "waiting"; i += 1) {
+        fireTimers(api.DEFAULT_POLL_INTERVAL, 1);
+        await flushMicrotasks();
+        await flushMicrotasks();
+      }
+    };
+
+    // 第 1 轮：桌面回答 → 自动填入并发送 → 网页回复 → 注入草稿（不执行）。
+    await fireTurn(1, "桌面端第 1 轮回答", "网页规划建议 A");
+    const s1 = rt.controller.getState();
+    if (boxValue !== "桌面端第 1 轮回答" || sendClicks !== 1) {
+      fail(`端到端第 1 轮：通道 A 没把桌面回答填入并发送（boxValue=${boxValue}, sendClicks=${sendClicks}）`);
+    } else ok("端到端第 1 轮·通道 A：turn/end → 真实 executeJavaScript 页面桥 fillAndSend 填入并点击发送");
+    if (s1.state !== "injected" || s1.lastReply !== "网页规划建议 A" || s1.loopCount !== 1) {
+      fail(`端到端第 1 轮：没进入 injected / 没抓到网页回复：${JSON.stringify(s1)}`);
+    } else ok("端到端第 1 轮·通道 B：停止按钮消失 → poll 抓回网页回复 → state=injected");
+    if (draftText !== "网页规划建议 A" || submitCalls !== 0 || s1.draftInjected !== true) {
+      fail(`端到端第 1 轮：草稿注入不对或误触发执行（draft=${draftText}, submit=${submitCalls}）`);
+    } else ok("端到端第 1 轮：网页回复只写 setDraft() 注入草稿，submit() 调用 0 次 —— 是否继续由用户决定");
+    if (countTimers(api.DEFAULT_POLL_INTERVAL) !== 0) fail("端到端第 1 轮：注入后仍继续轮询（没停下来等用户）");
+    else ok("端到端第 1 轮：注入后轮询停止，闭环暂停等用户点继续/运行");
+
+    // 用户判定「继续」→ acknowledge 回 idle；第 2 轮走同一条链。
+    rt.controller.acknowledge();
+    draftText = "";
+    await fireTurn(2, "桌面端第 2 轮回答", "网页规划建议 B");
+    const s2 = rt.controller.getState();
+    if (s2.state !== "injected" || s2.loopCount !== 2 || draftText !== "网页规划建议 B" || submitCalls !== 0) {
+      fail(`端到端第 2 轮：闭环没跑通第二轮：${JSON.stringify(s2)}, draft=${draftText}`);
+    } else ok("端到端第 2 轮：用户 acknowledge 后同一条链再次跑通（loopCount=2，仍不自动执行）");
+
+    // 第 3 次 acknowledge → 达到 maxAutoLoops=2 → paused；再来 turn/end 也不回传。
+    rt.controller.acknowledge();
+    if (rt.controller.getState().state !== "paused") fail("端到端：达到 maxAutoLoops 后没有 paused");
+    else ok("端到端：loopCount 达到 maxAutoLoops=2 → paused(max-loops)，自动循环封顶");
+    currentWindow = {
+      entries: [{ type: "turn/end", data: { turn: 3, reason: { kind: "completed" } } }],
+      change: { kind: "append", entries: [{ type: "turn/end", data: { turn: 3, reason: { kind: "completed" } } }] }
+    };
+    eventListener();
+    await flushMicrotasks();
+    if (countTimers(api.DEFAULT_POLL_INTERVAL) !== 0 || sendClicks !== 2) {
+      fail("端到端：封顶后仍触发了新的自动回传");
+    } else ok("端到端：封顶后新 turn/end 被跳过，没有第 3 次自动发送（三道安全阀在真实接线下生效）");
+
+    // 收尾：关总开关、解除 dock 订阅、清 fake timer，恢复默认配置。
+    api.writeConfig({
+      autoSyncEnabled: false,
+      maxAutoLoops: api.DEFAULT_MAX_LOOPS,
+      errorKeywords: [...api.DEFAULT_ERROR_KEYWORDS]
+    });
+    if (typeof dockCleanup === "function") dockCleanup();
+    rt.cancelled = true;
+    rt.bridge = null;
+    rt.dockBinding.current = null;
+    resetTimers();
+    flushEffects();
+  }
+}
+
+// ── I. 闭环追踪写入（v1.2.0「触发 + 观测」的可观测证据）───────────────────
+{
+	const IT = api.LOOP_TRACE_KEY;
+	if (IT === "dsh-plugin-deepseek-chat:loop-trace") ok("追踪键常量正确");
+	else fail("追踪键常量错误: " + IT);
+
+	// I1：H 段端到端链路跑过一轮后，四个阶段时间戳应已落盘（把「确实执行了回传」从推测变成证据）
+	const rawAfterH = storage.get(IT);
+	if (rawAfterH) {
+		let th; try { th = JSON.parse(rawAfterH); } catch { th = null; }
+		if (th && th.lastTurnEndAt && th.lastSendResult && th.lastResponseCompleteAt && th.lastDraftInjectedAt)
+			ok("端到端链路四阶段时间戳齐全（turn/end→发送→回复完成→草稿注入）");
+		else fail("端到端链路追踪缺阶段: " + JSON.stringify(th));
+		if (th && Array.isArray(th.events) && th.events.some((e) => e && e.stage === "turn/end"))
+			ok("追踪事件流含 turn/end（真实事件名，非 hooksBus/TurnEnd）");
+		else fail("追踪事件流缺 turn/end");
+	} else {
+		fail("H 段端到端链路未产生闭环追踪");
+	}
+
+	// I2：默认关闭时不写（惰性设计，不污染实机 localStorage）
+	storage.clear();
+	api.writeConfig({ autoSyncEnabled: false });
+	api.writeLoopTrace({ probe: 1 }, { stage: "x", detail: "y" });
+	if (storage.get(IT) === undefined) ok("默认关闭时 writeLoopTrace 不写任何追踪");
+	else fail("默认关闭时仍写入了追踪");
+
+	// I3：开启后写、字段合并、updatedAt、events 阶段流
+	api.writeConfig({ autoSyncEnabled: true });
+	api.writeLoopTrace({ lastSendResult: "ok", lastTurnEndAt: "2026-11-15T00:00:00.000Z" }, { stage: "send", detail: "ok" });
+	let t1; try { t1 = JSON.parse(storage.get(IT)); } catch { t1 = null; }
+	if (t1 && t1.lastSendResult === "ok" && t1.lastTurnEndAt && t1.updatedAt && Array.isArray(t1.events) && t1.events.some((e) => e && e.stage === "send"))
+		ok("开启后写入：字段合并 + updatedAt + events 阶段流（含 send 阶段）");
+	else fail("开启后追踪结构异常: " + JSON.stringify(t1));
+
+	// I4：events 上限 40（LOOP_TRACE_EVENT_CAP），超量丢弃最旧、保留最新
+	for (let i = 0; i < 50; i++) api.writeLoopTrace({}, { stage: "s" + i });
+	let t2; try { t2 = JSON.parse(storage.get(IT)); } catch { t2 = null; }
+	if (t2 && t2.events.length === api.LOOP_TRACE_EVENT_CAP && t2.events[t2.events.length - 1].stage === "s49")
+		ok("events 上限 40 生效且保留最新阶段");
+	else fail("events 上限异常: " + (t2 && t2.events.length));
+
+	// I5：createSyncController 的 onTrace 钩子在状态转换时被调用（纯状态机，不依赖 DOM）
+	const seen = [];
+	const ctl = api.createSyncController({
+		getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true }),
+		onTrace: (snap, reason) => seen.push([snap.state, reason])
+	});
+	const dec = ctl.handleTurnEnd({ sessionId: "sess-trace", turn: 7, reasonKind: "completed", answerText: "规划建议" });
+	if (dec.action === "push" && seen.some((x) => x[0] === "pushing")) ok("onTrace 钩子在 handleTurnEnd→pushing 时被触发");
+	else fail("onTrace 钩子未触发: " + JSON.stringify({ dec, seen }));
+
+	// 收尾：恢复默认关闭并清空 storage，不影响后续断言
+	api.writeConfig({ autoSyncEnabled: false });
+	storage.clear();
+}
+
+// ── J. v1.2.1 半自动带回（借鉴官方 @deepseek-ai/dsh-deepseek-chat-import
+//    的结构化导出语义，替代易超时的网页 DOM 抓取）───────────────────────────
+{
+  // J0：默认关闭，全自动 DOM 路径零回归。
+  if (api.DEFAULTS.halfAutoEnabled !== false) fail("halfAutoEnabled 默认必须为 false（不改动全自动路径）");
+  else ok("半自动：halfAutoEnabled 默认关闭，v1.2.0 全自动 DOM 路径零回归");
+
+  // J1：纯文本粘贴原样带回；空输入给出明确原因。
+  const rText = api.extractExportReply("  网页回复纯文本  ");
+  if (!rText.ok || rText.text !== "网页回复纯文本" || rText.source !== "text") fail("半自动：纯文本带回异常: " + JSON.stringify(rText));
+  else ok("半自动：用户直接粘贴网页回复纯文本，trim 后原样带回");
+  const rEmpty = api.extractExportReply("   ");
+  if (rEmpty.ok || rEmpty.reason !== "empty") fail("半自动：空输入没返回 empty");
+  else ok("半自动：空粘贴返回 empty，不写入空白草稿");
+
+  // 官方 export_format_version:3 会话文件（对齐 src/format.ts 的契约）。
+  const exportFile = {
+    id: "sess-1", title: "规划", current_message_id: 4,
+    messages: [
+      { id: 1, parent_id: null, role: "USER", status: "FINISHED", fragments: [{ type: "REQUEST", content: "问题" }] },
+      { id: 2, parent_id: 1, role: "ASSISTANT", status: "FINISHED", fragments: [{ type: "THINK", content: "思考" }, { type: "RESPONSE", content: "网页回复 A" }] },
+      { id: 3, parent_id: 2, role: "USER", status: "FINISHED", fragments: [{ type: "REQUEST", content: "追问" }] },
+      { id: 4, parent_id: 3, role: "ASSISTANT", status: "FINISHED", fragments: [{ type: "RESPONSE", content: "网页回复 B" }] },
+      { id: 5, parent_id: 2, role: "ASSISTANT", status: "FINISHED", fragments: [{ type: "RESPONSE", content: "被丢弃的分支" }] }
+    ]
+  };
+  // J2：按 current_message_id 选分支，只取 RESPONSE fragment（跳过 THINK/工具）。
+  const rExp = api.extractExportReply(JSON.stringify(exportFile));
+  if (!rExp.ok || rExp.source !== "export" || rExp.text !== "网页回复 B") fail("半自动：官方导出 JSON 解析异常: " + JSON.stringify(rExp));
+  else ok("半自动：官方导出 JSON 按 current_message_id 分支 + RESPONSE fragment 提取最新 FINISHED 回答");
+  // J3：非 FINISHED 回答被跳过，回退到更早的 FINISHED 回答（官方 replySteps 语义）。
+  const unfinished = JSON.parse(JSON.stringify(exportFile));
+  unfinished.messages[3].status = "TIMEOUT";
+  const rUn = api.extractExportReply(JSON.stringify(unfinished));
+  if (!rUn.ok || rUn.text !== "网页回复 A") fail("半自动：非 FINISHED 回答没被跳过: " + JSON.stringify(rUn));
+  else ok("半自动：非 FINISHED / 模板回答不进草稿，回退到最近一条 FINISHED 回答");
+  // J4：CONTENT_FILTER 撤回的问答对被略过。
+  const filtered = JSON.parse(JSON.stringify(exportFile));
+  filtered.messages[3].status = "CONTENT_FILTER";
+  const rFil = api.extractExportReply(JSON.stringify(filtered));
+  if (!rFil.ok || rFil.text !== "网页回复 A") fail("半自动：CONTENT_FILTER 没被跳过: " + JSON.stringify(rFil));
+  else ok("半自动：CONTENT_FILTER 撤回的回答被略过（官方 convertConversation 语义）");
+  // J5：current_message_id 缺失/为 null → 以最大 id 为叶选分支。
+  const noCurrent = { ...exportFile, current_message_id: null };
+  const rBranch = api.extractExportReply(JSON.stringify(noCurrent));
+  if (!rBranch.ok || rBranch.text !== "被丢弃的分支") fail("半自动：分支选择没回退到最大 id: " + JSON.stringify(rBranch));
+  else ok("半自动：current_message_id 缺失时按最大 id 选叶分支（官方 selectBranch 语义）");
+
+  // J6：真实运行单例接线 —— 半自动跳过 DOM 轮询，用户粘贴后只写草稿不执行。
+  const jCtx = makeCtx();
+  const jRt = api.ensureSyncRuntime(jCtx);
+  if (typeof jRt.dockDispose === "function") { try { jRt.dockDispose(); } catch { /* 已释放 */ } }
+  jRt.dockDispose = null;
+  storage.clear();
+  api.writeConfig({ autoSyncEnabled: true, halfAutoEnabled: true, maxAutoLoops: 3, errorKeywords: [...api.DEFAULT_ERROR_KEYWORDS] });
+  if (typeof jRt.dockDispose === "function") { try { jRt.dockDispose(); } catch { /* 订阅副作用 */ } }
+  jRt.dockDispose = null;
+  jRt.cancelled = false;
+  let jSent = "";
+  jRt.bridge = { send: async (t) => { jSent = t; return { ok: true }; }, poll: async () => ({ phase: "idle" }) };
+  let jDraft = "", jSubmit = 0;
+  jRt.dockBinding.current = { inputActions: { setDraft: (t) => { jDraft = t; }, submit: () => { jSubmit += 1; } }, sessionId: "sess-half" };
+  jRt.controller.reset();
+  jRt.controller.refresh();
+  const jWindow = {
+    entries: [{ type: "assistant/message", data: { turn: 1, message: { content: [{ type: "text", text: "桌面回答" }] } } }],
+    change: { kind: "append", entries: [{ type: "turn/end", data: { turn: 1, reason: { kind: "completed" } } }] }
+  };
+  api.onSessionEvents(jRt, { getSnapshot: () => jWindow }, "sess-half");
+  await flushMicrotasks();
+  await flushMicrotasks();
+  if (jSent !== "桌面回答") fail("半自动：通道 A 没自动发送桌面回答: " + jSent);
+  else ok("半自动：通道 A（turn/end → 回传-发送）仍自动执行，与全自动一致");
+  if (countTimers(api.DEFAULT_POLL_INTERVAL) !== 0) fail("半自动：仍启动了 DOM 停止按钮轮询（应跳过）");
+  else ok("半自动：send ok 后跳过 DOM 轮询，不再等待 180s 超时（对症实机 timeout）");
+  const sWaiting = jRt.controller.getState();
+  if (sWaiting.state !== "waiting") fail("半自动：没停在 waiting 等用户粘贴: " + JSON.stringify(sWaiting));
+  else ok("半自动：状态停在 waiting，显式等用户把网页回复/导出 JSON 粘贴回来");
+
+  const bring = api.bringBackReply(jRt, "网页规划建议 X");
+  await flushMicrotasks();
+  const sAfter = jRt.controller.getState();
+  if (!bring.ok || jDraft !== "网页规划建议 X" || jSubmit !== 0 || sAfter.draftInjected !== true) {
+    fail("半自动带回：草稿注入不对或误触发执行: " + JSON.stringify({ bring, jDraft, jSubmit, sAfter }));
+  } else ok("半自动带回：解析结果只写 setDraft() 注入草稿，submit() 调用 0 次 —— 是否继续由用户决定");
+  let jt; try { jt = JSON.parse(storage.get(api.LOOP_TRACE_KEY)); } catch { jt = null; }
+  if (!jt || !jt.lastTurnEndAt || !jt.lastSendResult || !jt.lastResponseCompleteAt || !jt.lastDraftInjectedAt) {
+    fail("半自动带回：闭环追踪四阶段没补齐: " + JSON.stringify(jt && { a: jt.lastTurnEndAt, b: jt.lastSendResult, c: jt.lastResponseCompleteAt, d: jt.lastDraftInjectedAt }));
+  } else ok("半自动带回：追踪四阶段时间戳齐全（turn/end→send→response-complete→draft-injected）");
+  if (sAfter.state !== "idle") fail("半自动带回：acknowledge 后没回到 idle: " + sAfter.state);
+  else ok("半自动带回：注入后 acknowledge 回到 idle，下一轮是否开启由用户判定");
+
+  api.writeConfig({ autoSyncEnabled: false, halfAutoEnabled: false });
+  jRt.cancelled = true;
+  jRt.bridge = null;
+  jRt.dockBinding.current = null;
+  resetTimers();
+  storage.clear();
+}
+
+// K. v1.2.2 决定性回归：修复「内容填入网页输入框但无法自动发送」。
+// 根因：旧实现把点击/键盘兜底整体包在 window.requestAnimationFrame 里，
+// 隐藏/被遮挡的 <webview> renderer 中 rAF 被 Chromium 节流为 0，回调永不执行。
+{
+  const cfgK = api.buildBridgeConfig();
+  const makeGuest = (opts) => {
+    let boxValue = "";
+    let sendClicks = 0;
+    const keyEvents = [];
+    const timers = [];
+    const box = {
+      isContentEditable: false,
+      getAttribute: () => null,
+      get value() { return boxValue; },
+      dispatchEvent(ev) { if (ev && ev.type === "keydown") keyEvents.push(ev); }
+    };
+    const textareaProto = {};
+    Object.defineProperty(textareaProto, "value", { configurable: true, get() { return boxValue; }, set(v) { boxValue = v; } });
+    const htmlProto = {};
+    Object.defineProperty(htmlProto, "innerHTML", { configurable: true, get() { return ""; }, set() {} });
+    let btnOn = opts.btnImmediate === true;
+    const sendBtn = { disabled: false, click() { sendClicks++; boxValue = ""; } };  // 点击后 React 清空输入框
+    const win = {
+      HTMLTextAreaElement: { prototype: textareaProto },
+      HTMLElement: { prototype: htmlProto },
+      requestAnimationFrame: (f) => { if (opts.rafRuns) f(); }   // rafRuns=false 模拟隐藏 renderer：永不调度
+    };
+    if (opts.hasTimeout) win.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; };
+    const doc = {
+      body: {},
+      querySelector(sel) {
+        if (cfgK.textareaSelectors.includes(sel)) return box;
+        if (cfgK.sendButtonSelectors.includes(sel)) return btnOn ? sendBtn : null;
+        return null;
+      },
+      querySelectorAll() { return []; }
+    };
+    class MO { constructor(cb) { this.cb = cb; } observe() {} disconnect() {} }
+    class Ev { constructor(type) { this.type = type; } }
+    class KeyEv { constructor(type, o) { this.type = type; Object.assign(this, o || {}); } }
+    const factory = new Function("window", "document", "MutationObserver", "Event", "KeyboardEvent",
+      "return (" + api.BRIDGE_IMPL + ")")(win, doc, MO, Ev, KeyEv);
+    return {
+      bridge: factory(cfgK), timers,
+      setBtnOn(v) { btnOn = v; },
+      stats() { return { boxValue, sendClicks, keyEvents }; }
+    };
+  };
+
+  // K1 决定性：隐藏 webview（rAF 永不调度）+ 按钮可用 → 仍同步立即点击成功。
+  const g1 = makeGuest({ rafRuns: false, btnImmediate: true, hasTimeout: false });
+  const r1 = g1.bridge.fillAndSend("桌面端回答");
+  if (g1.stats().sendClicks !== 1) {
+    fail(`v1.2.2 回归失败：隐藏 webview（rAF 不调度）时没有同步点击发送（sendClicks=${g1.stats().sendClicks}）`);
+  } else ok("v1.2.2 决定性修复：rAF 被节流为 0 的隐藏 webview 中，仍同步立即点击发送（不再依赖 requestAnimationFrame）");
+  if (!r1.ok || r1.method !== "click") fail("fillAndSend 没返回 method=click 供实机追踪复核");
+  else ok("fillAndSend 返回 method=click / attempts，写入 loop-trace 的 lastSendMethod 供实机客观复核");
+
+  // K2：选择器全落空 + 无定时器 → 键盘兜底，普通 Enter 优先（DeepSeek 默认），未清空才补 Ctrl+Enter。
+  const g2 = makeGuest({ rafRuns: false, btnImmediate: false, hasTimeout: false });
+  g2.bridge.fillAndSend("桌面端回答");
+  const k2 = g2.stats().keyEvents;
+  if (k2.length < 2 || k2[0].ctrlKey !== false || k2[1].ctrlKey !== true) {
+    fail(`键盘兜底没按「普通 Enter 优先 → 再 Ctrl+Enter」触发（events=${JSON.stringify(k2.map(e => ({ key: e.key, ctrlKey: e.ctrlKey })))}）`);
+  } else ok("选择器落空时键盘兜底：先普通 Enter（DeepSeek 默认发送），输入框未清空才补 Ctrl+Enter");
+  if (g2.bridge.status().sendMethod !== "enter+ctrlEnter") fail("status().sendMethod 没记录键盘兜底方式");
+  else ok("status() 暴露 sendMethod / sendClicks / sent 等可观测字段");
+
+  // K3：React 受控按钮延迟 enable（首次落空，120ms 后可用）→ setTimeout 重试点中。
+  const g3 = makeGuest({ rafRuns: false, btnImmediate: false, hasTimeout: true });
+  g3.bridge.fillAndSend("桌面端回答");
+  if (g3.stats().sendClicks !== 0) fail("延迟 enable 场景：不该在同步首试就点击");
+  else ok("按钮此刻尚未 enable 时，同步首试不误点，交给 window.setTimeout 重试");
+  g3.setBtnOn(true);
+  for (const t of g3.timers) { try { t.fn(); } catch (e) {} }
+  if (g3.stats().sendClicks !== 1) fail(`setTimeout 重试没点中延迟 enable 的按钮（sendClicks=${g3.stats().sendClicks}）`);
+  else ok("window.setTimeout 重试在隐藏 renderer 仍会触发，覆盖 React 受控按钮延迟 enable");
+
+  // K4：BRIDGE_IMPL 源码里发送触发已彻底移除 rAF 调用。
+  if (api.BRIDGE_IMPL.includes("window.requestAnimationFrame") || api.BRIDGE_IMPL.includes("requestAnimationFrame ||")) {
+    fail("BRIDGE_IMPL 仍残留 requestAnimationFrame 发送触发调用");
+  } else ok("BRIDGE_IMPL 源码已移除 requestAnimationFrame 发送触发（仅保留说明性注释）");
 }
 
 console.log(failures === 0 ? "RESULT: PASS" : `RESULT: FAIL (${failures})`);

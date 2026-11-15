@@ -78,7 +78,28 @@ partition = `persist:dsh-sidebar-browser-chat-v1`;
 4. 重新启动 DSH，打开「DeepSeek 聊天」，**扫码登录一次**。
 5. 退出 DSH 再打开，验证仍是登录状态——此后不再需要扫码。
 
-### 脚本（唯一推荐）
+### 一键脚本（推荐：新电脑免改）
+
+`scripts/` 随插件一起分发两个可直接双击的批处理，换一台电脑、DSH 装在别处也无需改任何路径：
+
+| 文件 | 作用 |
+|---|---|
+| `scripts/一键补丁.bat` | 自动定位 DSH、自动关闭 DSH、先 `--dry-run` 全量体检再打补丁，可选重启 DSH |
+| `scripts/回滚.bat` | 自动定位、取最新 `.bak-*` 备份恢复，先留 `.pre-rollback` 现场、失败自动退回并 dry-run 校验 |
+| `scripts/find-dsh.ps1` | 两份 bat 共用的路径探测（纯 ASCII），自动得出 `app.asar` / `DeepSeek Harness.exe` / node 路径 |
+
+**为什么换电脑不用改**：
+
+- **不写死路径**：`find-dsh.ps1` 依次尝试 用户拖入/输入的目录 → 注册表卸载项 → 运行中的 DSH 进程 → 常见安装根与各盘符一级目录（便携版任意目录名）→ 从插件目录向上回溯；实在找不到才提示把 DSH 安装文件夹拖进窗口（或输入路径）后回车。
+- **不依赖系统装 Node.js**：优先用 DSH 自带的 `resources/runtime/primary-runtime/dependencies/node/bin/node.exe`（实测 v24.21.0），没有才回退到 PATH 里的 `node`。
+- **不挑系统区域/代码页**：两份 bat 正文全部为纯 ASCII 英文提示（无 BOM），中文（936）或开启 UTF-8（65001）的控制台下命令都不会被误读；探测结果以系统 ANSI（GBK）写出，bat 内 `chcp 936` 后用 `for /f` 读回，含中文用户名的路径也能正确处理。
+- 自动提权、关进程、dry-run 校验、`already patched` 幂等识别、`0 failed` 全量 integrity 校验、回滚自动留现场等保护都在。
+
+> 直接双击 `scripts/一键补丁.bat` 即可，无需改路径、无需先装 Node.js。想看命令细节或自定义路径，用下方「手动调用脚本」。
+
+DSH 每次升级都会覆盖 `app.asar`、把分区还原成随机内存分区，升级后重跑本脚本即可（已在 DSH 0.2.2-rc.3 实测；`Partitions` 里的登录数据不会丢）。
+
+### 手动调用脚本（可选 / 自定义）
 
 上游仓库配套的 `patch-dsh-persistent-partition.cjs` 已适配逐文件 ASAR integrity，支持 `--dry-run`、幂等重跑、自动备份与**全量哈希校验**：
 
