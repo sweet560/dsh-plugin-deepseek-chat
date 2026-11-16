@@ -1,6 +1,6 @@
 {
   "name": "@tianyulinfeng1/dsh-plugin-deepseek-chat",
-  "version": "1.2.2",
+  "version": "1.2.6",
   "description": "DeepSeek Chat (chat.deepseek.com) as a DSH sidebar panel, a configurable conversation-header tab, and a right-sidebar card that uses dsh-better-sidebar when the service is running or DSH native right sidebar otherwise: full main-area chat that fills the conversation area, last-conversation memory, a stable login session, crash containment, a settings page (show/hide each surface + custom names, about info, and a check-for-updates button with one-click update through the official pluginManager.updateBundle channel against npm/GitHub), and pure web chat with no account status strip.",
   "type": "module",
   "main": "lib/index.js",

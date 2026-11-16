@@ -2,6 +2,82 @@
 
 All notable changes to this project are documented here.
 
+## 1.2.6 — 2026-11-16
+
+### 切会话后闭环照常走（B 方案）：订阅与草稿注入都按配对会话定向
+
+- **需求 / 用户反馈**：v1.2.5 的 A 方案（切走→暂停）虽消除了跨会话串台，但用户实机明确「切会话没有自动触发流程」，要求改为 **切会话后闭环照常走，同时不让别的会话内容串进来**（m02978）。
+- **可行性取证（决定性）**：v1.2.5 时代判断 B 方案有硬障碍（草稿只能经当前 composer 注入）。本次全量扫 app.asar（源码 src/ 与产物 lib/ 双向核对）推翻该判断——官方存在脱离当前 composer、对指定 `SessionBinding` 直接写草稿的 API：
+  - `dsh-client-ui-conversation/src/client/contract/input.ts:227-238` `SessionInputResolver.requestDraftInitialization(binding, options)`；:209-217 官方注释明确 **Session-routed**——「结果在会话切换后到达仍落到它自己会话的 composer」；
+  - `src/client/input/hub.ts:84-89` 用 `WeakMap<SessionBinding,...>` 按需创建 shell，**"never waits for a React mount"**，不依赖当前编辑器是否挂载；:86 会校验 `sessions().binding(binding.sessionId) === binding`（失效即 throw）；
+  - `src/client/input/facade.ts:312-326` 语义：`whenDraftExists:'replace'` → setDraft→'applied'；返回 'applied'|'preserved'|'blocked'；
+  - 官方自身范例 `dsh-client-ui-workspace/src/client/navigation.ts:373` 即在**导航切换时**用此 API 给目标会话准备草稿。
+- **修复（lib/client.js，全部落在插件边界内）**：
+  - **订阅所有权上移**：会话事件订阅从 composer dock 的 effect（依赖 `[p.sessionId]`，切走 A 即停）上移到 runtime 单例的 `ensureEventSubscription(rt, preferredSid)`。目标会话 = 配对会话优先（未配对才用当前会话，让首个 turn/end 能到达锁定）。配对后切走当前会话**不换订、不停订**，闭环继续跟随配对会话跑。dock 的 cleanup 不再停订；总开关关闭 / apply 卸载时才停订并注销配对监听。
+  - **草稿注入会话定向**：新增 `injectToSessionViaApi(rt,text)`，`ctx.get('conversation').input.requestDraftInitialization(sessions.binding(pairedId), {prompt:text, whenDraftExists:'replace'})`。injectDraft 优先走该 API；返回 applied/preserved 视为成功、不碰当前 composer；blocked/binding-lost 明确记因、**不回退写当前会话**（防反向串台）；仅当 API unavailable（旧 DSH / 测试桩 / 未绑定）才回退当前 composer setDraft（仍带 v1.2.5 会话一致性校验）。
+  - **状态条文案**：去掉 v1.2.5 的 `switched-away` 暂停语义——noteCurrentSession 现在只记录 currentSessionId、不改 state；当 currentSessionId ≠ pairedSessionId 时显示「闭环仍在配对会话运行 — 回复已注入该会话草稿；切回查看」（中英）。配对会话 id + 换绑按钮保留。
+  - **controller 保留**：v1.2.5 的会话过滤（handleTurnEnd/onSessionEvents 只认配对会话）继续保留，继续防串台；切走不再触发 paused。
+- **零回归**：A–M 全段保持；M6/M7 更新为 v1.2.6 行为（切走/切回不改闭环 state）。手写桩 controller 无 getState/isSessionOk 时全部 `typeof` / try-catch 判空放行。
+- **Verification**：`node --check` 通过；`node test/check-client.mjs` → `RESULT: PASS`，新增 **N 段 9 条断言**：① 官方会话定向 API 以 binding+prompt+replace 调用返回 applied；② binding 失效返回 binding-lost；③ conversation 服务不可用返回 unavailable；④ injectDraft 优先走 API、不写当前 composer；⑤ API blocked 时不回退写当前会话（防反向串台）；⑥ API 不可用时回退 setDraft（零回归）；⑦ 未配对时订阅跟随当前会话；⑧ 配对后订阅定向到配对会话、切走不换订；⑨ 目标不变时不重复订阅。A–N 全段全绿。
+- **如实限制**：只在「切会话=导航、未关闭会话 A」时成立；会话 A 被关闭/重建则 binding 失效，需点「换绑」重新配对。网页回复注入到配对会话草稿后，用户人在别的会话看不到，需切回该会话查看。该官方 API 相对内部，DSH 升级可能变动。官方 API 对私有/实验性服务的兼容性仍待更多实机样本复核。
+
+- **实机验证带回（2026-11-16，用户 GUI 实测）**：用户实测完整流程「网页 chat → 手动复制到 DSH 会话输入框 → DSH 会话内容 → 网页 chat（完成绑定）→ DSH 会话输入框（手动发送）→ DSH 会话内容 → 网页 chat → DSH 会话输入框」全程贯通，**确认不在会话界面时、绑定后自动闭环照常触发，流程完整**。据此 P0 核心项（切走期间闭环照常走、绑定后触发）已由实机坐实。据实措辞：链路中「复制到输入框」「手动发送」为人工步骤，自动部分为「DSH 会话内容 → 网页 chat → DSH 输入框」的搬运与注入；发布说明只写「绑定后自动闭环经实机验证」，不写「全自动」。
+- **已知缺口 / 未覆盖面（发布留痕，不阻塞本次发布）**：
+  1. `injectDraft` 中 `setDraft` 抛异常会被记为 `no-dock`（已定性，未修）；
+  2. `userMessageSelectors` 在 DeepSeek 站点从未命中，确认 `via` 恒为 `cleared`；
+  3. `lastSendMethod` 恒空，无法区分 click / Enter 兜底；
+  4. 会话关闭 / 重建导致 binding 失效时无自动兜底（1.2.6 B 方案新引入边界，需手动「换绑」）；
+  5. loop-trace 无 `sessionId` 字段，无法仅凭 trace 自证切走态；
+  6. 半自动带回（P2）本次未改，J 段仅离线回归。
+- **发布前机械核对**：六处版本字面量（package.json / lib/client.js 头注释与 `PLUGIN_VERSION` / CHANGELOG / README 中英 / test）均 `1.2.6`；`node --check` 通过；`node test/check-client.mjs` → `RESULT: PASS`（A–N 全段）；`npm pack --dry-run` → 26 文件、无 `test/` / `_preview*`，产物 `tianyulinfeng1-dsh-plugin-deepseek-chat-1.2.6.tgz`。
+
+## 1.2.5 — 2026-11-16
+
+### 修复跨会话串台：闭环只服务首次 turn/end 锁定的配对会话
+
+- **症状 / 用户反馈**：用户实机报告两类现象——① 发送后立刻切到别的会话，配对会话这一轮「没能触发」自动流程；② 切到另一会话（`session-2456ab5d-ad5a-4449-8eb5-1011b98b4656`）后，**那个会话关于抠图 / RMBG-2.0 / MATTING_ADAPTER_CONTRACT 的回答被自动搬进网页端**（附截图）。两者是同一个真实 bug 的两面，推翻了「没能触发 = 探针误报」的初步判断。
+- **根因（决定性，代码事实闭合）**：闭环 runtime 是模块级单例（一个 controller / loopCount / bridge / dockBinding），而 `syncAutoLoop` 把隐藏组件注册到全局 slot `conversation.composer.dock`；`makeSyncDock` 的 useEffect 对 `p.sessionId` 订阅对应会话 eventSource（依赖 `[p.sessionId]`）——**切到哪个会话就订阅哪个会话的 turn/end，没有任何「只认配对会话」过滤**。于是：切走 A → A 的 dock 随 composer 卸载、订阅停 → 「不触发」；切到 B → B 的订阅接管 → B 的 turn/end 触发 `pushAnswerToWeb`，而 webview 面板因 `keepMounted:true` + `ownsBridge` 仍指向原网页 → B 的回答被送进 A 配对的网页。加重缺口：`injectDraft` 直接取 `dockBinding.current`（被任意会话 dock 覆盖）且不校验会话 → 网页回复会被写进错误会话的草稿（反向串台）。此类串台中 no-webview / confirmAt 判据全部「正常」（链路每步真成功，只搬错了会话），比之前锁定的 webview 销毁分叉高一层级。
+- **方案选择**：经代码核实——① webview 三处注册点（`main` / `conversation.view` / 右栏卡片）全是全局 slot、webview 本身 session-independent，故 bridge 单例合理、无需先拆；② B 方案（切走仍同步）有硬障碍：草稿注入是 per-session 的，插件目前只能经当前会话 composer 的 `setDraft` 注入，切走后目标就是错的（除非有未核实的 per-session draft API）。故采用 **A 方案**：闭环同一时刻只服务一个配对会话，切走即暂停、切回即恢复，B 记入后续调研。用户 m02730 确认。
+- **修复（lib/client.js，全部落在插件边界内）**：
+  - `createSyncController` 新增 `pairedSessionId / currentSessionId / switchPaused / pauseFromState` 与 `noteCurrentSession(sid)` / `isSessionOk(sid)` / `unpair()`；`snapshot()` 暴露这三个状态字段，`reset()` 清空。
+  - `handleTurnEnd` 在**所有状态检查之前**做会话过滤：首次 turn/end 锁定 `pairedSessionId`，之后非配对会话一律 `skip(unpaired-session)`——既不被误判为 busy/max-loops，也不消耗配额，判读清晰。
+  - `onSessionEvents` 入口对非配对会话直接 return（连 trace 都不写，避免污染观测）；`injectDraft` 在调 `setDraft` 前校验 `dock.sessionId` 与配对会话一致，不符则拒绝（trace 写 `session-mismatch`），防反向串台。
+  - `makeSyncDock` 的 effect 内上报当前 composer 会话：切走配对会话 → 显式 `paused(switched-away)`（状态条显示专门文案，让「没搬运」从无声故障变成可见预期状态）；切回 → 自动恢复（中间态 waiting/pushing 归 idle，需用户重新点继续）。
+  - 状态条显示 `已绑定到会话 X`（短 id）+「换绑」按钮（`unpair()` + `reset()`），关掉重开即可换绑；中英 COPY 补 `syncPairedTo / syncSwitchPaused / syncRebind`。
+- **零回归**：主流程 Pushing→Waiting→Injected 不变；三道安全阀、发送确认（纯观测）、半自动带回、DOM 抓取轮询均未改。测试桩手写 controller 无新方法时用 `typeof` 判空放行，H/J/L 段零影响。
+- **Verification**：`node --check` 通过；`node test/check-client.mjs` → `RESULT: PASS`，新增 **M 段 9 条断言**：① 首次 turn/end 锁定配对会话；② 非配对会话 turn/end 被过滤（不搬运不增轮次）；③ `onSessionEvents` 对非配对会话直接丢弃、对配对会话放行；④ `injectDraft` 会话不符拒绝 setDraft；⑤ 会话相符正常注入；⑥ 切走 → paused(switched-away)；⑦ 切回 → 自动恢复；⑧ 换绑 unpair 清空配对状态；⑨ reset 清空配对状态。A–L 全段全绿。
+- **如实限制**：闭环同一时刻只服务一个会话——切到别的会话不会帮那个会话搬运，这是设计预期而非故障（状态条会显示「已暂停 / 已绑定会话 X」）。配对会话由首次 turn/end 自动锁定，换绑需点状态条「换绑」或关掉重开。切走期间的 webview 回复轮询会停止，切回后需用户重新触发（不自动续跑，决定权仍在用户）。B 方案（切走仍同步）依赖未核实的 per-session draft API，本次未做。按用户偏好**先不推送发布**，改动只留本地工作区，未 commit / push / tag / 发布。
+
+## 1.2.4 — 2026-11-16
+
+### 修复 v1.2.3 实机回归：发送确认假阴性 noteError 掐断回复抓取轮询
+
+- **症状 / 用户反馈**：User said (m02401): 「消息已经发出，但是在输入框中依旧有 消息内容，且网页回答已完毕，却没有自动回传到 你这边的输入框内」（附 m02397 / m02399 截图，状态条显示 `出错已停止 · unconfirmed`）。即：消息确实发出、网页回复也生成完了，但回复没有自动注入 Harness 输入框。
+- **根因（决定性）**：v1.2.3 的 `scheduleSendConfirmation` 在 3500ms 时调 `bridge.confirm()`；DeepSeek 站点没有 `[data-message-author-role="user"]` 节点（delta=0）且输入框残留内容（cleared=false）→ `via=none, confirmed=false` → `noteError("unconfirmed")` 把 state 从 waiting 翻成 error。而 `startReplyPolling` 的存活条件是 `st.state === "waiting"`——状态一翻成 error，轮询立刻停手，导致「网页回复已生成完却没人抓」。这推翻了 v1.2.3 声称的「确认是并行观测、零回归」：`noteError` 确实掐断了主链路。输入框残留 + 无 user 节点是 DeepSeek 站点的正常表现，并非发送失败，故属**假阴性**。
+- **修复（lib/client.js，全部落在插件边界内）**：
+  - `scheduleSendConfirmation` 的 `!cs.confirmed` 分支**不再调用 `noteError`**，确认降级为纯观测：只写 loop-trace（`lastSendConfirmed / lastSendConfirmVia / lastSendUserMsgDelta / lastSendConfirmAt`）与 `sendConfirmed` 标志，绝不改 state。失败上报交给「完整 180s 回复窗口过去仍无回复」的真实超时证据（`startReplyPolling` 的 `noteTimeout`）。
+  - 状态条「再试一次」按钮的触发条件从 `pausedReason==="unconfirmed"` 改为 `pausedReason!=="unconfirmed"`——只在 send 真失败（`res` 不 ok / exception → error）时出现，不再用假阳性触发。去掉误导性的 `syncUnconfirmed` 提示 span，只保留按钮本身。
+- **零回归**：主流程 Pushing→Waiting→Injected 不变；三道安全阀、`turn/end` 订阅、半自动带回、DOM 抓取轮询、手写桥桩跳过确认均未改。`confirm()` 仍可被观测与追踪，只是不再有「掐断」副作用。
+- **Verification**：`node --check lib/client.js` 通过；`node test/check-client.mjs` → `RESULT: PASS`，L 段新增 **L9 回归防线断言**：`confirm()` 返回 `via=none` 假阴性时 state 必须保持 `waiting`、pausedReason 不为 `unconfirmed`（直接锁住本次修复，防止再被改回 noteError）；A–K 全段 + L1–L8 全绿。
+- **Packaging**：版本升 `1.2.4`（`package.json` / `PLUGIN_VERSION` / 头注释 / 自检头注释同步）；中英 README / CHANGELOG 同步。
+- **如实限制**：发送确认现在是纯观测信号，不再单独触发失败上报或重试 UI——若确实发送未生效，用户需等到回复窗口超时（`state:timeout`）才会看到异常；期间可随时手动处理。`SEND_CONFIRM_DELAY` 的回读结果仍写入 loop-trace 供实机复核（`lastSendConfirmVia`）。按用户此前「先不推送发布」的偏好，改动只留本地工作区，未 commit / push / tag / 发布。
+
+## 1.2.3 — 2026-11-16
+
+### 发送确认：从「send 报 ok」升级为「确认用户消息真的出现在网页消息流」+ 显式失败上报 + 再试一次
+
+- **背景 / 用户三方向建议**：用户 m02006 提出三方向改进（①发送链确认状态已提交 / ②半自动带回有状态引导 / ③右边栏双路径互斥中间态）及统一状态模块建议，并声称「DSH 生态已验证：同一条消息可能在不同 source.kind 下各出现一次，按 message_id 去重并按 source 过滤」。事实核查结论：①原生 setter（native setter + input/change 事件）在 v1.2.2 已实现；③右栏互斥的 dispose 收口 + id 冲突 try/catch 已实现大半（`disposeCard` + `activeCardPath`）；②带回去重缺口真实但属 DSH 内部事件流字段（`rpcId` 非 message_id，且带回拿到的是用户粘贴纯文本/导出 JSON，无此字段可复用）；统一状态模块重构风险 > 收益。经 `ask_user_question` 用户选择 **scope=只做 P1 发送确认、version=升 1.2.3 先不发布**。本次只实现 P1。
+- **根因**：v1.2.2 的 `send` 报 `ok` 只说明「文本填入成功 + 触发了发送尝试」，并不等于网页真的提交了用户消息——若发送按钮选择器与键盘兜底都失效，`send` 仍可能返回 ok 但网页毫无反应（实机表现为长时间停在 waiting 直至 180s 超时）。缺一个「发送是否真生效」的客观回读。
+- **修复（`lib/client.js`，全部落在插件边界内，零回归「并行确认观测」）**：
+  - `BRIDGE_IMPL` 新增 `userMessageCount()`（统计 `pickAll(cfg.userMessageSelectors)` 匹配节点数）与 `confirm()`：`fillAndSend` 时在 native setter 写值后记录 `userMsgBaseline`；延迟确认时若用户消息节点数增量 `delta>=1` → `confirmed=true, via="node"`；若节点选择器未命中但输入框已被清空 → 降级 `confirmed=true, via="cleared"`；两者皆不满足 → `confirmed=false, via="none"`。`snapshot()` 暴露 `confirmed / userMsgCount`，`reset()` 重置这两个变量，返回对象加 `confirm`。
+  - 新常量 `SEND_CONFIRM_DELAY=3500`（必须 > `scheduleSends` 最晚重试 2800ms 与键盘兜底 1000ms，避免假阴性）；新配置字段 `userMessageSelectors`（第 14 字段，默认 `[data-message-author-role="user"]`），readConfig/writeConfig/DEFAULTS/设置页 textarea（`sync-user-message-selectors`）+ 中英 COPY 全链路打通。
+  - 桥接层 `bridgeConfirmExpression(cfg)`（自愈访问器 + `.confirm()`）；`makeWebviewBridge` 加 `confirm()`（手写桩无此方法 → 宿主 `scheduleSendConfirmation` 直接跳过，H/J 段零回归）。宿主 `pushAnswerToWeb` 的 `res.ok` 分支 `notePushed()` 后调用 `scheduleSendConfirmation(rt, bridge)`：延迟 `SEND_CONFIRM_DELAY` 后回读 `bridge.confirm()` → `noteSendConfirmed(ok)` + loop-trace 写 `lastSendConfirmed / lastSendConfirmVia / lastSendUserMsgDelta / lastSendConfirmAt`（stage `send-confirm`）；未确认则 `noteError("unconfirmed")` 显式失败上报。
+  - 状态机 `createSyncController` 新增 `lastPushText / sendConfirmed`：`handleTurnEnd` 进入 pushing 时记住本轮文本并重置确认态；新增 `noteSendConfirmed(ok)` 与 `retryPush()`（无上次推送则 skip；否则重置确认态、回 pushing、返回 `{action:"push", text:lastPushText, sessionId}`——**不增加轮次、不重复去重**）；状态条在 `error + pausedReason==="unconfirmed" + lastPushText` 时显示 `syncUnconfirmed` 提示 + `syncRetrySend`「再试一次」按钮（点击走 `retryPush()` → `pushAnswerToWeb`）。
+- **零回归**：不改变 Pushing→Waiting→Injected 主流程；不触发 `submit()`；三道安全阀、`turn/end` 订阅、半自动带回、DOM 抓取轮询、失败隔离均未改。`scheduleSendConfirmation` 对无 `confirm` 的桥桩直接跳过，手写桩测试零影响。
+- **Verification**：`node --check` 通过；`node test/check-client.mjs` → `RESULT: PASS`，新增 **L 段 10 条断言**（复用 BRIDGE_IMPL 编译桩 + 可变用户消息节点集合）：① 新用户消息节点 → `confirmed=true,via=node,delta>=1`；② 输入框已清空 → 降级 `via=cleared`；③ 无新节点且未清空 → `confirmed=false,via=none`（供失败上报）；④ `DEFAULTS.userMessageSelectors` 已暴露；⑤ `SEND_CONFIRM_DELAY=3500 > 2800`；⑥ `bridgeConfirmExpression` 生成正确表达式；⑦ push 记住 `lastPushText` + 重置确认态；⑧ `noteSendConfirmed(true)` 写入；⑨ 未确认 → `error(unconfirmed)` 且 `retryPush()` 重发不增轮次；⑩ 手写桩无 confirm 跳过 + 实机路径延迟回读生效。A–K 全段（含 H 端到端 / I 追踪 / J 半自动 / K 发送修复）全绿。
+- **Packaging**：版本升 `1.2.3`（`package.json` / `PLUGIN_VERSION` / 头注释 / 自检头注释同步）；`__test__` 暴露 `SEND_CONFIRM_DELAY / DEFAULT_USER_MESSAGE_SELECTORS / bridgeConfirmExpression / scheduleSendConfirmation`；中英 README / CHANGELOG 同步。
+- **如实限制**：用户消息节点确认依赖可配置选择器命中真实站点 DOM；若站点既不加用户消息节点又不清空输入框（如站点在隐藏 renderer 里用非标准方式提交），仍会走 `via=none` 失败上报——此时用「再试一次」或补 `sync-user-message-selectors`。`SEND_CONFIRM_DELAY=3500` 是经验值，慢网络下首次生成前节点可能延迟出现（但有输入框清空降级 + 失败上报兜底，不会失控）。CDP `Input.dispatchKeyEvent` 属长期演进，本次未做（webview executeJavaScript 内无 CDP 会话）。按用户确认**先不推送发布**，改动只留本地工作区，未 commit / push / tag / 发布。
+
 ## 1.2.2 — 2026-11-15
 
 ### 修复实机「内容填入网页输入框后无法自动发送」：把发送触发从 `requestAnimationFrame` 改为同步立即点击 + `setTimeout` 重试

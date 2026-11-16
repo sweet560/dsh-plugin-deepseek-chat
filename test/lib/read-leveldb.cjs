@@ -3,9 +3,10 @@
  *
  * DSH 桌面端把主窗口 window.localStorage 落盘到 <UserData>/Local Storage/leveldb。
  * 插件把「配置」和「闭环追踪」都存成 JSON 值，键分别是各自的 *KEY 常量。
- * 这里零依赖地复刻 verify-runtime.cjs 早期 C 段算法，避免两个探针重复造轮子：
- *   - 枚举 .log / .ldb，按 latin1 + utf16le 双编码查找键
- *   - 命中后在键后窗口内按花括号配平截出 {...} 并 JSON.parse
+ * 这里零依赖地解析这些值，避免两个探针重复造轮子：
+ *   - 枚举 .log / .ldb，按字节找 ASCII 键
+ *   - 键后的 JSON 值可能是纯 ASCII（latin1）或含中文（UTF-16LE），两种编码都试
+ *   - 命中后在键后窗口内按花括号配平截出 {...} 并 JSON.parse（正确处理字符串内的花括号/转义）
  *   - 返回该键对应的所有可解析对象（调用方自行挑最新的一条）
  *
  * 只读：全程 readFileSync / readdirSync / existsSync，绝不写任何实机文件。
@@ -27,27 +28,51 @@ function listLevelDbFiles(userData) {
     .map((e) => path.join(dir, e));
 }
 
-/** 在单个 buffer 的一种编码里，收集 key 之后所有可 parse 的 {...} 对象。 */
+/** 从一段字符串里截出第一个完整、可 JSON.parse 的 {...} 对象；字符串级扫描，能处理值内部的花括号与转义引号。 */
+function firstJsonObject(s) {
+  const st = s.indexOf('{');
+  if (st === -1) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = st; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) {
+        try {
+          const o = JSON.parse(s.slice(st, i + 1));
+          return (o && typeof o === 'object') ? o : null;
+        } catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * 在单个 buffer 里收集 key 之后所有可 parse 的 {...} 对象。
+ * leveldb 的 key 是 ASCII，用 latin1 找字节位置；值可能是 latin1 或 UTF-16LE
+ * （含中文的 JSON 由 Chromium 存成 UTF-16LE），两种编码分别解码后都尝试解析。
+ * 保留 enc 形参以兼容既有调用方，实际解析不再依赖单一编码。
+ */
 function parseObjectsAfterKey(buffer, enc, key) {
-  let s;
-  try { s = buffer.toString(enc); } catch { return []; }
+  const keyBuf = Buffer.from(String(key), 'latin1');
   const found = [];
   let from = 0, i;
-  while ((i = s.indexOf(key, from)) !== -1) {
-    from = i + key.length;
-    const seg = s.slice(from, from + 1600);
-    const st = seg.indexOf('{');
-    if (st === -1) continue;
-    let depth = 0, end = -1;
-    for (let j = st; j < seg.length; j++) {
-      if (seg[j] === '{') depth++;
-      else if (seg[j] === '}') { depth--; if (depth === 0) { end = j; break; } }
+  while ((i = buffer.indexOf(keyBuf, from)) !== -1) {
+    from = i + keyBuf.length;
+    const window = buffer.slice(from, Math.min(from + 20000, buffer.length));
+    for (const e of ['latin1', 'utf16le']) {
+      const o = firstJsonObject(window.toString(e));
+      if (o) found.push(o);
     }
-    if (end === -1) continue;
-    try {
-      const o = JSON.parse(seg.slice(st, end + 1));
-      if (o && typeof o === 'object') found.push(o);
-    } catch { /* 不是完整 JSON，跳过 */ }
   }
   return found;
 }
@@ -62,11 +87,9 @@ function readKeyObjects(userData, key) {
   for (const file of listLevelDbFiles(userData)) {
     let b;
     try { b = fs.readFileSync(file); } catch { continue; }
-    for (const enc of ['latin1', 'utf16le']) {
-      const parsed = parseObjectsAfterKey(b, enc, key);
-      if (parsed.length) hits.push(path.basename(file) + '(' + enc + ')');
-      for (const o of parsed) objects.push(o);
-    }
+    const parsed = parseObjectsAfterKey(b, 'both', key);
+    if (parsed.length) hits.push(path.basename(file) + '(latin1|utf16le)');
+    for (const o of parsed) objects.push(o);
   }
   return { objects, hits };
 }

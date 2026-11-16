@@ -1,4 +1,4 @@
-// dsh-plugin-deepseek-chat 客户端包离线自检（v1.2.2）。
+// dsh-plugin-deepseek-chat 客户端包离线自检（v1.2.6）。
 //
 // 这个包是浏览器 ModuleLoader 脚本，因此自检：
 //   1. 在 vm 里执行它，捕获 __ModuleLoader__.load 的注册；
@@ -1966,6 +1966,334 @@ storage.clear();
   if (api.BRIDGE_IMPL.includes("window.requestAnimationFrame") || api.BRIDGE_IMPL.includes("requestAnimationFrame ||")) {
     fail("BRIDGE_IMPL 仍残留 requestAnimationFrame 发送触发调用");
   } else ok("BRIDGE_IMPL 源码已移除 requestAnimationFrame 发送触发（仅保留说明性注释）");
+}
+
+// ── L. v1.2.3 发送确认（用户消息节点计数 + 失败上报 + 再试一次）────────────
+// 根因：send 报 ok 只说明「填入 + 触发了发送尝试」，网页是否真的提交需回读 DOM。
+// L 段复用 BRIDGE_IMPL 编译桩，扩展「用户消息节点集合」，验证 confirm 三态、
+// 配置链路、controller 重试语义、以及 scheduleSendConfirmation 的零回归与实机路径。
+{
+  const cfgL = api.buildBridgeConfig();
+  // 增强 guest 桩：querySelectorAll 能返回可变的用户消息节点集合。
+  const makeConfirmGuest = (opts = {}) => {
+    let boxValue = "";
+    let sendClicks = 0;
+    let userMsgNodes = [];
+    const box = {
+      isContentEditable: false,
+      getAttribute: () => null,
+      get value() { return boxValue; },
+      dispatchEvent(ev) { /* 键盘兜底不清空输入框，模拟 send 未生效 */ }
+    };
+    const textareaProto = {};
+    Object.defineProperty(textareaProto, "value", { configurable: true, get() { return boxValue; }, set(v) { boxValue = v; } });
+    const htmlProto = {};
+    Object.defineProperty(htmlProto, "innerHTML", { configurable: true, get() { return ""; }, set() {} });
+    let btnOn = opts.btnImmediate === true;
+    const sendBtn = { disabled: false, click() { sendClicks++; boxValue = ""; } };  // 点击后 React 清空输入框
+    const win = { HTMLTextAreaElement: { prototype: textareaProto }, HTMLElement: { prototype: htmlProto } };
+    const doc = {
+      body: {},
+      querySelector(sel) {
+        if (cfgL.textareaSelectors.includes(sel)) return box;
+        if (cfgL.sendButtonSelectors.includes(sel)) return btnOn ? sendBtn : null;
+        return null;
+      },
+      querySelectorAll(sel) {
+        if (cfgL.userMessageSelectors.includes(sel)) return userMsgNodes;
+        return [];
+      }
+    };
+    class MO { constructor(cb) { this.cb = cb; } observe() {} disconnect() {} }
+    class Ev { constructor(type) { this.type = type; } }
+    class KeyEv { constructor(type, o) { this.type = type; Object.assign(this, o || {}); } }
+    const factory = new Function("window", "document", "MutationObserver", "Event", "KeyboardEvent",
+      "return (" + api.BRIDGE_IMPL + ")")(win, doc, MO, Ev, KeyEv);
+    return {
+      bridge: factory(cfgL),
+      addUserMsg() { userMsgNodes = userMsgNodes.concat([{}]); },
+      stats() { return { boxValue, sendClicks, userMsgCount: userMsgNodes.length }; }
+    };
+  };
+
+  // L1：网页出现新用户消息节点 → 确认成功（via=node, delta>=1）。
+  const c1 = makeConfirmGuest({ btnImmediate: true });
+  c1.bridge.fillAndSend("桌面端回答");
+  c1.addUserMsg();
+  const cf1 = c1.bridge.confirm();
+  if (!cf1.confirmed || cf1.via !== "node" || cf1.delta < 1) {
+    fail(`发送确认 L1 失败：新用户消息节点未确认（${JSON.stringify(cf1)}）`);
+  } else ok("v1.2.3 发送确认：网页出现新用户消息节点 → confirmed=true, via=node, delta>=1");
+
+  // L2：用户消息节点数不变，但输入框已被清空 → 降级确认成功（via=cleared）。
+  const c2 = makeConfirmGuest({ btnImmediate: true });
+  c2.bridge.fillAndSend("桌面端回答");
+  const cf2 = c2.bridge.confirm();
+  if (!cf2.confirmed || cf2.via !== "cleared") {
+    fail(`发送确认 L2 失败：输入框清空未降级确认（${JSON.stringify(cf2)}）`);
+  } else ok("发送确认降级：节点未命中但输入框已清空 → confirmed=true, via=cleared（避免误报失败）");
+
+  // L3：既无新用户消息、输入框又未清空 → 确认失败（via=none），触发上报。
+  const c3 = makeConfirmGuest({ btnImmediate: false });  // 按钮不可用且无定时器 → 键盘兜底不清空
+  c3.bridge.fillAndSend("桌面端回答");
+  const cf3 = c3.bridge.confirm();
+  if (cf3.confirmed || cf3.via !== "none") {
+    fail(`发送确认 L3 失败：未提交却误判为已确认（${JSON.stringify(cf3)}）`);
+  } else ok("发送确认失败态：无新用户消息且输入框未清空 → confirmed=false, via=none（供失败上报）");
+
+  // L4：配置链路 + 延迟常量约束（必须 > 最晚重试 2800ms，避免假阴性）。
+  if (!Array.isArray(api.DEFAULTS.userMessageSelectors) || api.DEFAULTS.userMessageSelectors.length === 0) {
+    fail("DEFAULTS 缺 userMessageSelectors（第 14 配置字段）");
+  } else ok("配置链路：DEFAULTS.userMessageSelectors 已暴露（可在设置页自定义用户消息选择器）");
+  if (typeof api.SEND_CONFIRM_DELAY !== "number" || api.SEND_CONFIRM_DELAY <= 2800) {
+    fail(`SEND_CONFIRM_DELAY=${api.SEND_CONFIRM_DELAY} 必须 > 最晚重试 2800ms`);
+  } else ok(`延迟常量：SEND_CONFIRM_DELAY=${api.SEND_CONFIRM_DELAY}ms > 2800ms 最晚重试，避免确认假阴性`);
+
+  // L5：bridgeConfirmExpression 生成正确的自愈 + .confirm() 表达式。
+  const exprL = api.bridgeConfirmExpression(cfgL);
+  if (!exprL.includes("__dshDeepSeekBridge") || !exprL.trimEnd().endsWith(".confirm()")) {
+    fail("bridgeConfirmExpression 未生成 __dshDeepSeekBridge ... .confirm() 表达式");
+  } else ok("桥接表达式：bridgeConfirmExpression = 自愈访问器 + .confirm()，实机可回读确认态");
+
+  // L6：controller 记住上次推送 + 确认结果 + 再试一次不增加轮次。
+  let cfgCtlL = { ...api.DEFAULTS, autoSyncEnabled: true, maxAutoLoops: 3 };
+  const ctlL = api.createSyncController({ getConfig: () => cfgCtlL });
+  const decL = ctlL.handleTurnEnd({ sessionId: "sL", turn: 1, reasonKind: "completed", answerText: "回答X" });
+  if (decL.action !== "push" || ctlL.getState().lastPushText !== "回答X" || ctlL.getState().sendConfirmed !== false) {
+    fail("handleTurnEnd 未记住 lastPushText / 未初始化 sendConfirmed=false");
+  } else ok("状态机：push 时记住 lastPushText 并重置 sendConfirmed=false");
+  ctlL.noteSendConfirmed(true);
+  if (!ctlL.getState().sendConfirmed) fail("noteSendConfirmed(true) 未写入 sendConfirmed");
+  else ok("状态机：noteSendConfirmed(true) 写入确认结果供状态条/追踪读取");
+  ctlL.noteError("unconfirmed");
+  if (ctlL.getState().state !== "error" || ctlL.getState().pausedReason !== "unconfirmed") {
+    fail("未确认未进入 error(unconfirmed) 失败上报态");
+  } else ok("失败上报：未确认 → state=error, pausedReason=unconfirmed（状态条显示再试一次）");
+  const reDec = ctlL.retryPush();
+  if (reDec.action !== "push" || reDec.text !== "回答X" || ctlL.getState().loopCount !== 1) {
+    fail(`retryPush 未正确重发上次文本或增加了轮次（${JSON.stringify(reDec)}）`);
+  } else ok("再试一次：retryPush 返回上次推送文本、重置确认态、不增加轮次不重复去重");
+
+  // L7：手写桥桩（无 confirm 方法）直接跳过，不排确认 timer（H/J 段零回归）。
+  resetTimers();
+  const rtNoConfirm = { cancelled: false, controller: ctlL, bridge: { send() {}, poll() {} } };
+  api.scheduleSendConfirmation(rtNoConfirm, rtNoConfirm.bridge);
+  if (countTimers(api.SEND_CONFIRM_DELAY) !== 0) fail("无 confirm 的手写桥桩不应排确认 timer（破坏零回归）");
+  else ok("零回归：手写桥桩无 confirm 方法时 scheduleSendConfirmation 直接跳过");
+
+  // L8：实机路径——延迟 SEND_CONFIRM_DELAY 后回读 confirm 并写入状态/追踪。
+  resetTimers();
+  ctlL.reset(); ctlL.refresh();
+  ctlL.handleTurnEnd({ sessionId: "sL2", turn: 2, reasonKind: "completed", answerText: "回答Y" });
+  ctlL.notePushed();  // → waiting
+  let confirmCalls = 0;
+  const rtL = {
+    cancelled: false,
+    controller: ctlL,
+    bridge: { confirm() { confirmCalls += 1; return { confirmed: true, via: "node", delta: 1 }; } }
+  };
+  api.scheduleSendConfirmation(rtL, rtL.bridge);
+  if (countTimers(api.SEND_CONFIRM_DELAY) !== 1) fail("实机路径应排一个 SEND_CONFIRM_DELAY 确认 timer");
+  else ok("实机路径：scheduleSendConfirmation 排出一个延迟确认 timer");
+  fireTimers(api.SEND_CONFIRM_DELAY, 1);
+  await settle();
+  if (confirmCalls !== 1 || !ctlL.getState().sendConfirmed) {
+    fail(`延迟确认回调未生效（confirmCalls=${confirmCalls}, sendConfirmed=${ctlL.getState().sendConfirmed}）`);
+  } else ok("实机路径：SEND_CONFIRM_DELAY 后回读 bridge.confirm() 并写入 sendConfirmed");
+
+  // L9（v1.2.4 回归防线）：确认回读 via=none（假阴性）时绝不能 noteError 掐断回复轮询。
+  // 实机 m02401：DeepSeek 无 [data-message-author-role=user] 节点且输入框残留草稿 → confirmed=false；
+  // v1.2.3 据此 noteError 把 waiting 翻成 error，掐断 startReplyPolling（仅在 waiting 存活），
+  // 结果「网页回复已生成完却没抓回桌面」。v1.2.4 把确认降级为纯观测，此处锁住该行为。
+  resetTimers();
+  ctlL.reset(); ctlL.refresh();
+  ctlL.handleTurnEnd({ sessionId: "sL3", turn: 3, reasonKind: "completed", answerText: "回答Z" });
+  ctlL.notePushed();  // → waiting
+  const rtL2 = {
+    cancelled: false,
+    controller: ctlL,
+    bridge: { confirm() { return { confirmed: false, via: "none", delta: 0 }; } }
+  };
+  api.scheduleSendConfirmation(rtL2, rtL2.bridge);
+  fireTimers(api.SEND_CONFIRM_DELAY, 1);
+  await settle();
+  if (ctlL.getState().state !== "waiting" || ctlL.getState().pausedReason === "unconfirmed") {
+    fail(`假阴性确认不应掐断回复轮询：state=${ctlL.getState().state}, pausedReason=${ctlL.getState().pausedReason}`);
+  } else ok("v1.2.4 回归防线：确认 via=none 假阴性时 state 保持 waiting，回复轮询不被掐断");
+}
+
+// ── M 段（v1.2.5 跨会话串台修复）：配对会话锁定 + 会话过滤 + 注入校验 + 切走暂停 + 换绑 ──
+{
+  const ctlCfg = () => ({ ...api.DEFAULTS, autoSyncEnabled: true, maxAutoLoops: 3 });
+  const ctlM = api.createSyncController({ getConfig: ctlCfg });
+
+  // M1：首次 turn/end 锁定配对会话。
+  let md = ctlM.handleTurnEnd({ sessionId: "sA", turn: 1, reasonKind: "completed", answerText: "回答A" });
+  if (md.action !== "push" || ctlM.getState().pairedSessionId !== "sA") {
+    fail("首次 turn/end 未锁定配对会话");
+  } else ok("v1.2.5：首次 turn/end 锁定配对会话 sA");
+
+  // M2：非配对会话的 turn/end 被过滤（不搬运、轮次不变）。
+  const beforeLoop = ctlM.getState().loopCount;
+  md = ctlM.handleTurnEnd({ sessionId: "sB", turn: 1, reasonKind: "completed", answerText: "回答B" });
+  if (md.action !== "skip" || md.reason !== "unpaired-session" || ctlM.getState().loopCount !== beforeLoop) {
+    fail(`非配对会话 turn/end 未过滤：action=${md.action}, reason=${md.reason}`);
+  } else ok("v1.2.5：非配对会话 sB 的 turn/end 被过滤，不搬运不增轮次");
+
+  // M3：onSessionEvents 对非配对会话直接丢弃（连 handleTurnEnd 都不调）。
+  let turnHandled = 0;
+  const ctlSpy = {
+    isSessionOk: (sid) => ctlM.isSessionOk(sid),
+    getState: () => ctlM.getState(),
+    handleTurnEnd: () => { turnHandled += 1; return { action: "skip" }; }
+  };
+  const snapM = { change: { kind: "append", entries: [{ event: { type: "turn/end", data: { reason: { kind: "completed" }, turn: 2 } } }] } };
+  const srcM = { getSnapshot: () => snapM };
+  const rtM = { controller: ctlSpy };
+  api.onSessionEvents(rtM, srcM, "sB");
+  if (turnHandled !== 0) fail("onSessionEvents 未挡住非配对会话 sB");
+  else ok("v1.2.5：onSessionEvents 对非配对会话直接丢弃，不写 trace 不触发推送");
+  api.onSessionEvents(rtM, srcM, "sA");
+  if (turnHandled !== 1) fail("onSessionEvents 未放行配对会话 sA");
+  else ok("v1.2.5：onSessionEvents 放行配对会话 sA 的 turn/end");
+
+  // M4：injectDraft 会话不符 → 拒绝（防反向串台），不调用 setDraft。
+  let mismatchedDraft = "";
+  const rtMismatch = {
+    dockBinding: { current: { sessionId: "sB", inputActions: { setDraft(t) { mismatchedDraft = t; } } } },
+    controller: ctlM
+  };
+  const okMismatch = api.injectDraft(rtMismatch, "网页回复-错会话");
+  if (okMismatch !== false || mismatchedDraft !== "") fail("injectDraft 未拒绝错会话 dock");
+  else ok("v1.2.5：injectDraft 校验 dock 会话不符时拒绝注入（防反向串台）");
+
+  // M5：injectDraft 会话相符 → 正常写入草稿。
+  const rtMatch = {
+    dockBinding: { current: { sessionId: "sA", inputActions: { setDraft(t) { mismatchedDraft = t; } } } },
+    controller: ctlM
+  };
+  const okMatch = api.injectDraft(rtMatch, "网页回复-正确会话");
+  if (okMatch !== true || mismatchedDraft !== "网页回复-正确会话") fail("injectDraft 未放行配对会话 dock");
+  else ok("v1.2.5：injectDraft 校验 dock 会话相符时正常 setDraft");
+
+  // M6（v1.2.6 B 方案）：切走配对会话 → 不再暂停，state 保持，仅更新 currentSessionId。
+  const stateBeforeSwitch = ctlM.getState().state;
+  ctlM.noteCurrentSession("sB");
+  const stSw = ctlM.getState();
+  if (stSw.state !== stateBeforeSwitch || stSw.currentSessionId !== "sB" || stSw.switchPaused) {
+    fail(`切走配对会话不应暂停：state=${stSw.state}, current=${stSw.currentSessionId}`);
+  } else ok("v1.2.6：切走配对会话不暂停，闭环状态保持不变（currentSessionId=sB）");
+
+  // M7（v1.2.6）：切回配对会话 → state 仍不变，currentSessionId 更新回 sA。
+  ctlM.noteCurrentSession("sA");
+  const stBack = ctlM.getState();
+  if (stBack.state !== stateBeforeSwitch || stBack.currentSessionId !== "sA") fail("切回配对会话状态被改动");
+  else ok("v1.2.6：切回配对会话不改动闭环状态（currentSessionId=sA）");
+
+  // M8：换绑 unpair 清空配对会话与切走状态。
+  ctlM.noteCurrentSession("sB");
+  ctlM.unpair();
+  const stUnpair = ctlM.getState();
+  if (stUnpair.pairedSessionId !== "" || stUnpair.switchPaused) fail("换绑未清空配对状态");
+  else ok("v1.2.5：换绑 unpair 清空配对会话与切走暂停状态");
+
+  // M9：reset 清空配对状态。
+  const ctlM2 = api.createSyncController({ getConfig: ctlCfg });
+  ctlM2.handleTurnEnd({ sessionId: "sZ", turn: 1, reasonKind: "completed", answerText: "回答Z" });
+  ctlM2.reset();
+  if (ctlM2.getState().pairedSessionId !== "") fail("reset 未清空配对会话");
+  else ok("v1.2.5：reset 清空配对会话，可重新绑定");
+}
+
+// ── N 段（v1.2.6 B 方案）：切会话后闭环照常走——跨会话草稿 API + 订阅上移 ──
+{
+  // N1：官方会话定向 API 被正确调用（binding + prompt + whenDraftExists:'replace'）。
+  let captured = null;
+  const bindingStub = { sessionId: "sA" };
+  const sessionsStub = { binding: (id) => (id === "sA" ? bindingStub : null) };
+  const convStub = { input: { requestDraftInitialization: (binding, opts) => { captured = { binding, opts }; return "applied"; } } };
+  const rtApi = {
+    ctx: { get: (name) => (name === "sessions" ? sessionsStub : name === "conversation" ? convStub : null) },
+    controller: { getState: () => ({ pairedSessionId: "sA" }), noteDraftInjected: () => {} },
+    dockBinding: { current: null }
+  };
+  const r1 = api.injectToSessionViaApi(rtApi, "网页回复");
+  if (r1 !== "applied" || captured.binding !== bindingStub || captured.opts.prompt !== "网页回复" || captured.opts.whenDraftExists !== "replace") {
+    fail(`跨会话草稿 API 调用参数错误：result=${r1}`);
+  } else ok("v1.2.6：官方会话定向草稿 API 以 binding+prompt+replace 调用，返回 applied");
+
+  // N2：binding 失效（会话关闭/重建）→ binding-lost。
+  const rtLost = { ...rtApi, ctx: { get: (name) => (name === "sessions" ? { binding: () => null } : name === "conversation" ? convStub : null) } };
+  if (api.injectToSessionViaApi(rtLost, "x") !== "binding-lost") fail("binding 失效未返回 binding-lost");
+  else ok("v1.2.6：配对会话 binding 失效时返回 binding-lost（明确记因）");
+
+  // N3：无 conversation 服务（旧 DSH / 测试桩）→ unavailable。
+  const rtNoConv = { ...rtApi, ctx: { get: (name) => (name === "sessions" ? sessionsStub : null) } };
+  if (api.injectToSessionViaApi(rtNoConv, "x") !== "unavailable") fail("无 conversation 服务未返回 unavailable");
+  else ok("v1.2.6：conversation 服务不可用时返回 unavailable（触发回退）");
+
+  // N4：injectDraft 优先走 API——不碰当前 composer 的 setDraft。
+  let dockSetCalls = 0;
+  const rtViaApi = {
+    ...rtApi,
+    dockBinding: { current: { sessionId: "sB", inputActions: { setDraft() { dockSetCalls += 1; } } } },
+    controller: { getState: () => ({ pairedSessionId: "sA" }), noteDraftInjected: (v) => { rtViaApi._noted = v; } }
+  };
+  const okViaApi = api.injectDraft(rtViaApi, "回给A会话");
+  if (okViaApi !== true || dockSetCalls !== 0 || rtViaApi._noted !== true) {
+    fail(`injectDraft 未优先走会话 API：ok=${okViaApi}, dockCalls=${dockSetCalls}`);
+  } else ok("v1.2.6：injectDraft 优先走会话定向 API，不写当前会话 composer（切走也不串台）");
+
+  // N5：API 返回 blocked → 不回退写当前 dock（防反向串台）。
+  const convBlocked = { input: { requestDraftInitialization: () => "blocked" } };
+  let dockBlockedCalls = 0;
+  const rtBlocked = {
+    ctx: { get: (name) => (name === "sessions" ? sessionsStub : name === "conversation" ? convBlocked : null) },
+    controller: { getState: () => ({ pairedSessionId: "sA" }), noteDraftInjected: (v) => { rtBlocked._noted = v; } },
+    dockBinding: { current: { sessionId: "sB", inputActions: { setDraft() { dockBlockedCalls += 1; } } } }
+  };
+  const okBlocked = api.injectDraft(rtBlocked, "不应写入");
+  if (okBlocked !== false || dockBlockedCalls !== 0) fail("API blocked 时错误回退写了当前会话草稿");
+  else ok("v1.2.6：API blocked/binding-lost 时不回退写当前会话（防反向串台）");
+
+  // N6：API unavailable 时回退当前 composer setDraft（配对一致），保证旧版本兼容。
+  let fallbackDraft = "";
+  const rtFallback = {
+    ctx: { get: () => null },
+    controller: { getState: () => ({ pairedSessionId: "sA" }), isSessionOk: (sid) => sid === "sA", noteDraftInjected: () => {} },
+    dockBinding: { current: { sessionId: "sA", inputActions: { setDraft(t) { fallbackDraft = t; } } } }
+  };
+  const okFallback = api.injectDraft(rtFallback, "回退草稿");
+  if (okFallback !== true || fallbackDraft !== "回退草稿") fail("API 不可用时未回退 setDraft");
+  else ok("v1.2.6：API 不可用时回退当前 composer setDraft（老版本/测试桩零回归）");
+
+  // N7：订阅上移——未配对时订当前会话。
+  const subscribedIds = [];
+  const subState = { pairedSessionId: "", currentSessionId: "sB" };
+  const sessionsForSub = { binding: (id) => ({ eventSource: {
+    subscribe() { subscribedIds.push(id); return () => {}; }, getSnapshot() { return { change: null }; }
+  } }) };
+  const rtSub = {
+    ctx: { get: (name) => (name === "sessions" ? sessionsForSub : null) },
+    controller: { getState: () => subState },
+    eventSubs: { sid: "", stop: null }
+  };
+  api.ensureEventSubscription(rtSub, "sB");
+  if (rtSub.eventSubs.sid !== "sB" || !subscribedIds.includes("sB")) fail("未配对时未订当前会话");
+  else ok("v1.2.6：未配对时订阅跟随当前会话（让首个 turn/end 到达以锁定）");
+
+  // N8：配对后切会话——订阅重定向到配对会话，不跟随当前会话。
+  subState.pairedSessionId = "sA";
+  subState.currentSessionId = "sB";
+  api.ensureEventSubscription(rtSub, "sB");
+  if (rtSub.eventSubs.sid !== "sA" || !subscribedIds.includes("sA")) fail("配对后订阅未重定向到配对会话");
+  else ok("v1.2.6：配对后订阅定向到配对会话 sA，切走当前会话不换订");
+
+  // N9：重复调用不重复订阅（sid 相同直接 return）。
+  const countA = subscribedIds.filter((s) => s === "sA").length;
+  api.ensureEventSubscription(rtSub, "sB");
+  if (subscribedIds.filter((s) => s === "sA").length !== countA) fail("重复订阅了同一会话");
+  else ok("v1.2.6：目标会话不变时不重复订阅（避免事件重复触发）");
 }
 
 console.log(failures === 0 ? "RESULT: PASS" : `RESULT: FAIL (${failures})`);

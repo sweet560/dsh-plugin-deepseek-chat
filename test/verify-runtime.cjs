@@ -45,7 +45,7 @@ const v120Marks = ['autoSyncEnabled', '__dshDeepSeekBridge', 'deepseek-chat-auto
   'SyncStatusBar', 'BRIDGE_IMPL', 'injectDraft', 'onSessionEvents', 'syncAutoLoop',
   'syncStopSelectorsHint', 'maxAutoLoops', 'errorKeywords'];
 const found = v120Marks.filter(k => client.includes(k));
-if (version === '1.2.0' && version === pkg.version) ok('client.js 版本 == package.json 版本', version);
+if (version !== '(未找到)' && version === pkg.version) ok('client.js 版本 == package.json 版本', version);
 else bad('版本不一致', 'client=' + version + ' pkg=' + pkg.version);
 if (found.length === v120Marks.length) ok('v1.2.0 全部核心标记', found.length + '/' + v120Marks.length);
 else bad('缺少 v1.2.0 标记', '缺 ' + JSON.stringify(v120Marks.filter(k => !client.includes(k))));
@@ -149,11 +149,22 @@ head('G. 实机闭环追踪（能读到即证明 autoSyncEnabled 内存态已生
 const traceResult = leveldb.readKeyObjects(UD, LOOP_TRACE_KEY);
 const trace = leveldb.newestByUpdatedAt(traceResult.objects);
 const TRACE_FIELDS = ['lastTurnEndAt', 'lastSendResult', 'lastResponseCompleteAt', 'lastDraftInjectedAt'];
+// v1.2.4：发送确认判读字段（via / delta / sentAt→confirmAt）与草稿注入结果（区分两种「草稿没变」成因）
+const CONFIRM_FIELDS = ['lastSendMethod', 'lastSendConfirmVia', 'lastSendConfirmed', 'lastSendUserMsgDelta', 'lastSendAt', 'lastSendConfirmAt'];
+const DRAFT_FIELDS = ['lastDraftResult', 'lastDraftPreview'];
 if (trace) {
   ok('发现闭环追踪', traceResult.hits.join(', '));
   info('开关内存态（门控证据）', 'trace 能写入 → lib/client.js:726 的 if(!autoSyncEnabled)return 已通过 → 实机已开启');
   info('updatedAt / state / loopCount', String(trace.updatedAt) + ' / ' + String(trace.state) + ' / ' + String(trace.loopCount));
   for (const k of TRACE_FIELDS) info(k, String(trace[k] == null ? '(未记录)' : trace[k]));
+  head('G1. 发送确认判读（via=node 稳定 / delta 小值 / sentAt→confirmAt≈3500ms）');
+  for (const k of CONFIRM_FIELDS) info(k, String(trace[k] == null ? '(未记录)' : trace[k]));
+  if (trace.lastSendAt && trace.lastSendConfirmAt) {
+    const gapMs = Date.parse(trace.lastSendConfirmAt) - Date.parse(trace.lastSendAt);
+    info('sentAt→confirmAt 间隔(ms)', Number.isFinite(gapMs) ? String(gapMs) : '(解析失败)');
+  }
+  head('G2. 草稿注入结果（no-dock=抓到回复但 setDraft 未调用 / ok=setDraft 已调用）');
+  for (const k of DRAFT_FIELDS) info(k, String(trace[k] == null ? '(未记录)' : trace[k]));
   if (Array.isArray(trace.events)) info('阶段事件数（最多 40）', trace.events.length + ' 条');
   if (trace.lastAbortReason) info('最近熔断原因', String(trace.lastAbortReason));
   const covered = TRACE_FIELDS.filter(k => trace[k]).length;
