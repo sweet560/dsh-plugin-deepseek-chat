@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## 1.4.0 — 2026-11-17
+
+> ⚠️ **发布标注：本版「全自动投递通道」尚未经过真机实验**，仅通过离线自检（`RESULT: PASS`），尚未在真实 DSH 桌面环境跑通完整链条；请先小范围试用并观察 loop-trace，异常可用状态栏「■ 停止全自动」随时接管。原有的条件触发式自动闭环（v1.2.x）与半自动带回（v1.2.1）已实机验证，本版未改其主路径。
+
+### 全自动投递通道：桌面 / 网页 / 用户三者串成无人值守链条
+
+- **需求 / 用户决策**：m00002 要把 DSH 桌面会话（开发 agent，暂定 hy4-flash、后期或换 deepseek V4）、chat.deepseek.com（思考与审查 agent）、用户（决策者）串成全自动链条；m00077 卡片决策——混合式（默认自动、随时接管）、启动/终止由用户定、网页输出需按格式提炼（只把指定区块传给桌面，不盲目全文投递，省上下文省 Token）、遇重启 DSH 或同内容重复 2 次即暂停弹卡让用户选、语义通过 + 最大轮数双保险、在现有插件加「全自动模式」；m00295 追加「请重启宿主验收 / 宿主验收」等用户介入词（handoff），命中必须由用户本人接管。
+- **取证决定实现档位**：解包 `app.asar` 明文 .d.ts 取证确认官方 `conversation.send(text: string): Promise<void>`（内部 `session.prompt([...],'queue')`）为公开 API（@32359122 / 实现 @31110837 / 官方调用范式 @68344954、@69768129），`InputActions.submit()`（@31769000）与 `SessionInputResolver.requestDraftInitialization()`（@31766000）一并确认。自动提交主路径选 `conversation.send`——一行官方 API、异步可捕获错误、无视草稿锁定、不碰 DOM，规避 v1.3.0 因原生 setter 直写 DOM 清残留翻车回退的教训；禁止合成键盘/点击为首选（native 键盘桥截断合成事件）。取证用只读临时脚本 `test/asar-grep.cjs` / `test/asar-extract.cjs`（字节搜索 + 偏移提取，非交付物）；asar header pickle 非纯 JSON，`test/asar-list.cjs` 解析失败（教训）。
+- **配置层**：新增 `autoPilotEnabled`（默认关）、`pilotAutoSubmit`（默认开）、`pilotMarkerStart/End`（`<TO_DEV>`/`</TO_DEV>`）、`pilotDoneKeywords`（DONE/完成/通过/APPROVED）、`pilotRestartKeywords`、`pilotHandoffKeywords`（请重启宿主验收/宿主验收/请用户验收/需要你本人/需要人工介入/handoff to user/user verification）、`pilotOutputContract`（含 `{start}/{end}/{done}` 占位符）；纳入 DEFAULTS / readConfig 校验 / writeConfig 合并 / 中英 COPY / 设置页第五张卡片。
+- **纯函数**：`extractPilotPayload(reply,cfg)` 完成词优先、`indexOf` 按字面量截定界区块（可含正则元字符），返回 `{ok,text,state,reason}`（state: ok/no-marker/done/empty），无区块绝不盲投全文；`buildPilotPush(answerText,cfg)` 追加输出契约并字符串替换占位符；`classifyPilotReply(replyState,prevPayload,cfg)` 按 done→restart→handoff→duplicate→error→max-loops→no-marker→continue 判定，重复检测去空白后与上轮比较。
+- **controller 扩展**：新增 `autoPilot` / `pilotDecision` / `lastInjectPayload` 状态与方法 `startPilot/stopPilot/setPilotDecision/notePilotInjected/beginPilotSubmit/notePilotSubmitted/decide`（continue/edit/retry/terminate）。
+- **数据流接线**：推送时全自动激活则追加输出契约；网页回复完成时若全自动激活走 `handlePilotReply` 提炼判定中枢（continue 写提炼区块 + `tryAutoSubmit`，done/pause 弹决策卡）；半自动带回 v1.2.1 老路径零回归。`tryAutoSubmit` 用官方 `conversation.send`（回退 `sessions.scope(paired).get("conversation")`），无 API 或抛错降级 `submit-unavailable`「请按发送」卡。
+- **UI**：状态栏加「▶ 启动全自动 / ■ 停止全自动」按钮与决策卡（按 kind 显示原因文案 + 继续/编辑/重试/终止，edit 复用半自动 textarea 范式 + data 属性约定）；设置页第五张「全自动投递通道」卡片。
+- **测试 / 版本**：离线自检新增 R 段（纯函数 / 判定优先级 / handoff / controller 生命周期 / 自动提交成功与降级 / 只写提炼区块 / 启停），设置页卡片数断言 4→5；A–Q 全段 `RESULT: PASS`。版本 1.3.0→1.4.0：package.json（version / description / files 加入 RELEASE_NOTES_v1.4.0.md）、lib/client.js（头注释 + v1.4.0 设计段 + PLUGIN_VERSION + 双语 infoSummary）、README.md / README.en.md、CHANGELOG、locale/{zh,en}.json、docs/RELEASE_NOTES_v1.4.0.md。
+- **生效与限制**：client bundle 进程启动时缓存，需从托盘彻底退出 DSH 再重启才加载新模式；无 `conversation.send` 时降级「请按发送」卡；网页是否遵守输出契约决定能否提炼，no-marker 弹卡不盲投全文。模型无关，无需改码。
+
 ## 1.3.0 — 2026-11-16
 
 ### 状态栏增强：手动绑定 + 齿轮直达设置页 + 会话标题

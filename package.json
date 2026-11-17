@@ -1,7 +1,7 @@
 {
   "name": "@tianyulinfeng1/dsh-plugin-deepseek-chat",
-  "version": "1.3.0",
-  "description": "A two-way bridge between DeepSeek desktop conversations and the web chat for DSH: three chat entries (sidebar / header tab / right-sidebar card) plus an optional conditional auto-loop that transfers a finished desktop answer to chat.deepseek.com, grabs the web reply and writes it only into the desktop draft (never auto-executed), with cross-session isolation, manual session bind, a status-bar settings gear, session titles, three safety valves, a settings page with check-for-updates / one-click update, stable login and crash containment.",
+  "version": "1.4.0",
+  "description": "A DSH plugin that embeds chat.deepseek.com and two-way bridges desktop conversations with the web chat: three chat entries, an optional auto-loop (web reply → desktop draft only), and a v1.4.0 full auto-pilot channel that extracts a delimited review block, auto-submits the next turn via official conversation.send and pauses on a decision card you control.",
   "type": "module",
   "main": "lib/index.js",
   "icon": "./icon.svg",
@@ -23,6 +23,7 @@
     "docs/RELEASE_NOTES_v1.1.8.md",
     "docs/RELEASE_NOTES_v1.1.9.md",
     "docs/RELEASE_NOTES_v1.1.10.md",
+    "docs/RELEASE_NOTES_v1.4.0.md",
     "docs/screenshot.png",
     "docs/screenshot-chat.png",
     "icon.svg",

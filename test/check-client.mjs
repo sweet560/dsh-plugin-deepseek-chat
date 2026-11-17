@@ -871,10 +871,10 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   api.resetUpdateState();
   const form = mount(react.createElement(settingsSlot.component, {}));
 
-  // 四组卡片边框（v1.2.0 增加自动闭环）：按逻辑分组、用主题令牌细边框/圆角/浅底。
+  // 五组卡片边框（v1.4.0 增加全自动通道）：按逻辑分组、用主题令牌细边框/圆角/浅底。
   const cards = collectElements(form).filter((el) =>
     el.getAttribute("data-dsh-plugin-deepseek-chat") === "settings-card");
-  if (cards.length !== 4) fail(`设置页应有 4 张分组卡片，实际 ${cards.length}`);
+  if (cards.length !== 5) fail(`设置页应有 5 张分组卡片，实际 ${cards.length}`);
   else {
     const expected = {
       border: ".5px solid var(--dsw-alias-border-l3)",
@@ -2565,6 +2565,193 @@ storage.clear();
   api.focusDeepSeekChatSection(docNoPanel, () => 0);
   if (misclick.length !== 0) fail("齿轮定位：面板不存在时误点了主界面同名按钮（会切走会话界面）：" + JSON.stringify(misclick));
   else ok("齿轮定位：面板不存在时绝不误点主界面同名按钮（修复会话界面被切走的回归）");
+}
+
+// ── R 段（v1.4.0 全自动投递通道）────────────────────────────────────────────
+// 提炼 / 判定 / 输出契约 / 自动提交档位 / 决策卡生命周期 / 启停。
+{
+  const need = [
+    "extractPilotPayload", "buildPilotPush", "classifyPilotReply", "tryAutoSubmit",
+    "handlePilotReply", "startAutoPilot", "stopAutoPilot", "DEFAULT_PILOT_MARKER_START",
+    "DEFAULT_PILOT_MARKER_END", "DEFAULT_PILOT_DONE_KEYWORDS", "DEFAULT_PILOT_RESTART_KEYWORDS",
+    "DEFAULT_PILOT_HANDOFF_KEYWORDS", "DEFAULT_PILOT_OUTPUT_CONTRACT"
+  ];
+  const missing = need.filter((k) => api[k] === undefined);
+  if (missing.length) fail("R 段：__test__ 缺少全自动导出：" + missing.join(", "));
+  else ok("R 段：全自动纯函数 / 数据流 / 常量均已导出");
+
+  // 默认值：全自动默认关闭，自动提交默认开启。
+  if (api.DEFAULTS.autoPilotEnabled !== false || api.DEFAULTS.pilotAutoSubmit !== true ||
+      api.DEFAULTS.pilotMarkerStart !== "<TO_DEV>" || api.DEFAULTS.pilotMarkerEnd !== "</TO_DEV>" ||
+      !Array.isArray(api.DEFAULTS.pilotHandoffKeywords) || api.DEFAULTS.pilotHandoffKeywords.length === 0) {
+    fail("R 段：DEFAULTS 全自动字段不对：" + JSON.stringify({
+      autoPilotEnabled: api.DEFAULTS.autoPilotEnabled, pilotAutoSubmit: api.DEFAULTS.pilotAutoSubmit,
+      pilotMarkerStart: api.DEFAULTS.pilotMarkerStart, pilotMarkerEnd: api.DEFAULTS.pilotMarkerEnd
+    }));
+  } else ok("R 段：DEFAULTS 全自动默认关闭 / 自动提交开 / 定界符与用户介入词齐全");
+
+  const cfgM = {
+    pilotMarkerStart: "<TO_DEV>", pilotMarkerEnd: "</TO_DEV>",
+    pilotDoneKeywords: ["DONE", "完成", "通过", "APPROVED"]
+  };
+
+  // 提炼：定界符区块 / 完成词优先 / 无定界符 / 空区块。
+  {
+    const a = api.extractPilotPayload("前言\n<TO_DEV>fix the bug\n第 5 行</TO_DEV>\n后记", cfgM);
+    if (!a.ok || a.state !== "ok" || a.text !== "fix the bug\n第 5 行") fail("R 段：定界符提炼失败：" + JSON.stringify(a));
+    else ok("R 段：只提炼 {start}…{end} 之间的区块（前后废话全部丢弃）");
+    const d = api.extractPilotPayload("看起来 <TO_DEV>whatever</TO_DEV> DONE", cfgM);
+    if (d.state !== "done" || d.ok) fail("R 段：完成词未优先识别：" + JSON.stringify(d));
+    else ok("R 段：完成词优先于定界符，命中即判完成（state=done）");
+    const n = api.extractPilotPayload("没有区块的普通回复", cfgM);
+    if (n.state !== "no-marker" || n.ok) fail("R 段：无定界符未报 no-marker：" + JSON.stringify(n));
+    else ok("R 段：无定界符区块 → no-marker（不盲目投递全文）");
+    const e = api.extractPilotPayload("<TO_DEV>   </TO_DEV>", cfgM);
+    if (e.state !== "empty" || e.ok) fail("R 段：空区块未报 empty：" + JSON.stringify(e));
+    else ok("R 段：空区块 → empty");
+    // 定界符含正则元字符时按字面量提取（不用正则）。
+    const meta = api.extractPilotPayload("[[x]]payload[[/x]]", { pilotMarkerStart: "[[x]]", pilotMarkerEnd: "[[/x]]", pilotDoneKeywords: [] });
+    if (!meta.ok || meta.text !== "payload") fail("R 段：含正则元字符的定界符提取失败：" + JSON.stringify(meta));
+    else ok("R 段：定界符含正则元字符时按字面量 indexOf 提取");
+  }
+
+  // 输出契约：占位符用字符串替换，不误伤正则元字符。
+  {
+    const push = api.buildPilotPush("桌面正文", {
+      ...cfgM, pilotOutputContract: "OUT {start} MID {end} END {done}"
+    });
+    if (push !== "桌面正文\n\nOUT <TO_DEV> MID </TO_DEV> END DONE") {
+      fail("R 段：输出契约占位符替换不对：" + JSON.stringify(push));
+    } else ok("R 段：buildPilotPush 追加契约并替换 {start}/{end}/{done}");
+    const defPush = api.buildPilotPush("正文", cfgM);
+    if (defPush.indexOf("<TO_DEV>") < 0 || defPush.indexOf("</TO_DEV>") < 0 || defPush.indexOf("DONE") < 0) {
+      fail("R 段：默认输出契约未含定界符/完成词：" + JSON.stringify(defPush));
+    } else ok("R 段：默认输出契约含定界符与完成词");
+  }
+
+  // 判定优先级：done → restart → handoff → duplicate → error → max-loops → no-marker → continue。
+  {
+    const c = (s, prev, extra) => api.classifyPilotReply(s, prev, { ...extra });
+    let v = c({ ok: false, text: "", state: "done", reason: "done-word" }, "", {});
+    if (v.action !== "done") fail("R 段：done 判定失败：" + JSON.stringify(v));
+    v = c({ ok: true, text: "请重启 DSH 再试", state: "ok" }, "", {});
+    if (v.kind !== "restart") fail("R 段：重启词判定失败：" + JSON.stringify(v));
+    v = c({ ok: true, text: "请重启宿主验收", state: "ok" }, "", {});
+    if (v.kind !== "handoff") fail("R 段：用户介入词判定失败：" + JSON.stringify(v));
+    v = c({ ok: true, text: "same text", state: "ok" }, "same   text", {});
+    if (v.kind !== "duplicate") fail("R 段：重复回复判定失败：" + JSON.stringify(v));
+    v = c({ ok: true, text: "Traceback: boom", state: "ok" }, "", {});
+    if (v.kind !== "error") fail("R 段：错误词判定失败：" + JSON.stringify(v));
+    v = c({ ok: true, text: "fresh reply", state: "ok" }, "", { loopCount: 3, maxAutoLoops: 3 });
+    if (v.kind !== "max-loops") fail("R 段：最大轮数判定失败：" + JSON.stringify(v));
+    v = c({ ok: false, text: "", state: "no-marker", reason: "no-start-marker" }, "", {});
+    if (v.action !== "pause" || v.kind !== "no-start-marker") fail("R 段：无区块判定失败：" + JSON.stringify(v));
+    v = c({ ok: true, text: "fresh reply", state: "ok" }, "", { loopCount: 1, maxAutoLoops: 3 });
+    if (v.action !== "continue") fail("R 段：正常回复未判 continue：" + JSON.stringify(v));
+    if (v.action === "continue" && v.kind === "continue") ok("R 段：判定优先级 done→restart→handoff→duplicate→error→max-loops→no-marker→continue 全部命中");
+  }
+
+  // controller 全自动生命周期：startPilot / 决策卡 / decide / 提交回 idle。
+  {
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true, maxAutoLoops: 3 }) });
+    ctl.startPilot();
+    let s = ctl.getState();
+    if (!s.autoPilot || s.state !== "idle" || s.pilotDecision) fail("R 段：startPilot 未进入 autoPilot idle：" + JSON.stringify(s));
+    ctl.setPilotDecision({ kind: "duplicate", payload: "abc", reason: "duplicate-reply" });
+    s = ctl.getState();
+    if (s.state !== "paused" || !s.pilotDecision || s.pilotDecision.kind !== "duplicate") fail("R 段：决策卡未进入 paused：" + JSON.stringify(s));
+    let r = ctl.decide("continue");
+    if (r.action !== "continue" || ctl.getState().pilotDecision || ctl.getState().state !== "idle") fail("R 段：decide(continue) 未清卡回 idle：" + JSON.stringify(r));
+    ctl.notePilotInjected("上轮文本");
+    ctl.setPilotDecision({ kind: "handoff", payload: "验收", reason: "handoff-word" });
+    r = ctl.decide("retry");
+    if (r.action !== "submit" || r.text !== "上轮文本" || ctl.getState().state !== "pushing") fail("R 段：decide(retry) 未带原文本重投：" + JSON.stringify(r));
+    ctl.setPilotDecision({ kind: "error", payload: "x", reason: "error-keyword" });
+    r = ctl.decide("edit", "  改写后的意见  ");
+    if (r.action !== "submit" || r.text !== "  改写后的意见  ") fail("R 段：decide(edit) 未用编辑文本：" + JSON.stringify(r));
+    r = ctl.decide("skip-with-no-decision");
+    if (r.action !== "skip") fail("R 段：无决策卡时 decide 未 skip：" + JSON.stringify(r));
+    ctl.setPilotDecision({ kind: "done", payload: "ok", reason: "done-word" });
+    r = ctl.decide("terminate");
+    if (r.action !== "terminated" || ctl.getState().autoPilot || ctl.getState().state !== "off") fail("R 段：decide(terminate) 未关闭全自动：" + JSON.stringify(r));
+    else ok("R 段：controller 全自动生命周期（启停/决策卡/继续/重试/编辑/终止）全部正确");
+  }
+
+  // 让模块级 getConfig() 读到开启状态，供 writeLoopTrace / tryAutoSubmit / handlePilotReply 使用。
+  api.writeConfig({
+    autoSyncEnabled: true,
+    autoPilotEnabled: true,
+    pilotAutoSubmit: false,
+    maxAutoLoops: 5,
+    pilotDoneKeywords: ["DONE", "完成"],
+    pilotRestartKeywords: ["重启 DSH", "重启桌面", "restart DSH", "restart harness"],
+    pilotHandoffKeywords: ["请重启宿主验收", "宿主验收", "需要你本人"],
+    errorKeywords: ["Error", "Traceback", "Failed", "panic", "FATAL"]
+  });
+
+  // tryAutoSubmit：官方 conversation.send 主路径成功 → 回 idle；无 API → 决策卡 submit-unavailable。
+  {
+    const sent = [];
+    const conv = { send: (t) => { sent.push(t); return Promise.resolve(); } };
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true }) });
+    ctl.startPilot();
+    const rt = { ctx: { get: (n) => (n === "conversation" ? conv : undefined) }, controller: ctl, cancelled: false };
+    const okSubmit = await api.tryAutoSubmit(rt, "提炼后的意见");
+    if (okSubmit !== true || sent.length !== 1 || sent[0] !== "提炼后的意见" || ctl.getState().state !== "idle") {
+      fail("R 段：tryAutoSubmit 官方 API 路径失败：" + JSON.stringify({ okSubmit, sent, state: ctl.getState().state }));
+    } else ok("R 段：tryAutoSubmit 用官方 conversation.send 提交提炼文本，成功后回 idle 等下一轮");
+
+    const ctl2 = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true }) });
+    ctl2.startPilot();
+    const rt2 = { ctx: { get: () => undefined }, controller: ctl2 };
+    const noApi = await api.tryAutoSubmit(rt2, "x");
+    const dec2 = ctl2.getState().pilotDecision;
+    if (noApi !== false || !dec2 || dec2.kind !== "submit-unavailable") {
+      fail("R 段：无自动提交 API 时未降级决策卡：" + JSON.stringify({ noApi, dec2 }));
+    } else ok("R 段：无自动提交 API → 降级 submit-unavailable 决策卡（请按发送），绝不合成键盘/直写 DOM");
+  }
+
+  // handlePilotReply：done / pause(handoff) / continue（只写提炼区块，不投递全文）。
+  {
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true, maxAutoLoops: 5 }) });
+    ctl.startPilot();
+    let draft = "";
+    const rt = {
+      ctx: { get: () => undefined },
+      controller: ctl,
+      dockBinding: { current: { sessionId: "s", inputActions: { setDraft: (t) => { draft = t; }, submit() {} } } },
+      cancelled: false
+    };
+    let res = await api.handlePilotReply(rt, "DONE 完美，任务完成");
+    if (res.action !== "done" || ctl.getState().pilotDecision.kind !== "done") fail("R 段：handlePilotReply done 失败：" + JSON.stringify(res));
+
+    ctl.startPilot();
+    res = await api.handlePilotReply(rt, "<TO_DEV>请重启宿主验收</TO_DEV>");
+    if (res.action !== "pause" || res.kind !== "handoff") fail("R 段：handlePilotReply handoff 失败：" + JSON.stringify(res));
+
+    ctl.startPilot();
+    draft = "";
+    res = await api.handlePilotReply(rt, "一堆前言<TO_DEV>请只改第 5 行</TO_DEV>一堆后记");
+    if (res.action !== "draft") fail("R 段：handlePilotReply continue 未走 draft：" + JSON.stringify(res));
+    if (draft !== "请只改第 5 行" || draft.indexOf("前言") >= 0 || draft.indexOf("后记") >= 0) {
+      fail("R 段：桌面草稿混入了网页全文而非只有提炼区块：" + JSON.stringify(draft));
+    } else ok("R 段：handlePilotReply continue 只把提炼区块写入桌面草稿，绝不投递网页全文");
+  }
+
+  // startAutoPilot / stopAutoPilot：绑定当前会话、清 cancelled、开关运行态。
+  {
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true, maxAutoLoops: 3 }) });
+    const rt = { controller: ctl, cancelled: true, dockBinding: { current: { sessionId: "s-pilot" } }, ctx: { get: () => undefined } };
+    const started = api.startAutoPilot(rt);
+    let s = ctl.getState();
+    if (!started || !s.autoPilot || s.pairedSessionId !== "s-pilot" || rt.cancelled !== false) {
+      fail("R 段：startAutoPilot 失败：" + JSON.stringify({ started, paired: s.pairedSessionId, cancelled: rt.cancelled }));
+    } else ok("R 段：startAutoPilot 绑定当前会话并进入运行态");
+    const stopped = api.stopAutoPilot(rt);
+    s = ctl.getState();
+    if (!stopped || s.autoPilot || s.state !== "off") fail("R 段：stopAutoPilot 失败：" + JSON.stringify(s));
+    else ok("R 段：stopAutoPilot 退回 off，用户随时可停");
+  }
 }
 
 console.log(failures === 0 ? "RESULT: PASS" : `RESULT: FAIL (${failures})`);

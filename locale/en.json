@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DeepSeek Chat",
-    "description": "A two-way bridge between DeepSeek desktop conversations and chat.deepseek.com: three chat entries (sidebar, header tab, right-sidebar card) plus an optional conditional auto-loop that transfers a finished desktop answer to the web page, grabs the web reply and writes it only into the desktop draft (never auto-executed). Adds cross-session isolation, status-bar manual bind and settings gear, session titles, three safety valves, and a settings page with check-for-updates and one-click update."
+    "description": "Embeds chat.deepseek.com and two-way bridges desktop conversations with the web chat: three chat entries, an optional auto-loop (web reply → desktop draft only), and a v1.4.0 full auto-pilot channel that extracts a delimited review block, auto-submits the next turn via official conversation.send and pauses on a decision card you control."
   }
 }

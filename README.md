@@ -2,91 +2,27 @@
 
 [English](README.en.md) | 中文
 
-> **当前版本：v1.3.0** ｜适配 DSH **0.2.2-rc.3**
+> **当前版本：v1.4.0** ｜适配 DSH **0.2.2-rc.3**
+>
+> ⚠️ **「全自动投递通道」为实验性功能，尚未经过真机实验**（仅离线自检通过）。请先小范围试用，异常可用状态栏「■ 停止全自动」随时接管。详情见 [RELEASE_NOTES_v1.4.0.md](docs/RELEASE_NOTES_v1.4.0.md)。
+> [GitHub](https://github.com/sweet560/dsh-plugin-deepseek-chat) ｜ [Gitee 镜像](https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat)
 
-本插件不只是把 `chat.deepseek.com` 嵌进 DSH——它是一套把 **DeepSeek 桌面会话与网页聊天双向桥接**的自动化工具：
-
-- **三个入口**：左侧栏图标、会话顶栏标签页、右边栏卡片（自动适配 dsh-better-sidebar 或 DSH 原生右侧栏，默认名「DeepSeek 聊天」，可开关 / 改名），打开同一份铺满会话区的网页聊天，记住上次会话。
-- **条件触发式自动闭环（可选开启）**：桌面一轮执行完成 → 自动把回答回传网页并发送 → 抓取网页回复 → **只写入桌面草稿**（绝不自动执行），是否继续始终由你决定；支持全自动 / 半自动带回两种模式，带最大轮数、错误关键词熔断、同轮去重三道安全阀。
-- **跨会话隔离**：闭环只服务手动绑定或首轮锁定的配对会话，切到别的会话不中断订阅、不串台；网页回复定向写回配对会话自己的草稿。
-- **状态栏工具**：一键「绑定当前会话」（无需先跑一轮）、齿轮直达本插件设置页并定位「DeepSeek 聊天」、把「已绑定到会话」显示为会话标题。
-- 另有**设置页面**（开关 / 改名 / 闭环配置 / 关于 / 检查更新 / 一键更新）、稳定的登录会话与崩溃隔离；面板为**纯网页聊天**，不显示账号状态。
-
-> 仓库：[GitHub](https://github.com/sweet560/dsh-plugin-deepseek-chat) ｜ [Gitee 镜像](https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat)
+把 `chat.deepseek.com` 嵌进 DSH，并把**桌面会话与网页聊天双向桥接**成自动化工具。npm 包名：`@tianyulinfeng1/dsh-plugin-deepseek-chat`。
 
 ![面板截图](docs/screenshot.png)
 
 ![网页聊天界面（已登录）](docs/screenshot-chat.png)
 
-> 上图为 `chat.deepseek.com` 已登录后的新对话首页（「早上好，今天有什么计划？」），即插件内嵌网页的实际呈现；下图为插件在 DSH 桌面版里的面板位置。
+## 核心功能
 
-## 功能
+- **三个入口**：左侧栏图标、会话顶栏标签页、右边栏卡片（默认名「DeepSeek 聊天」，可开关/改名），打开同一份铺满会话区的网页聊天，记住上次会话。
+- **条件触发式自动闭环**（可选）：桌面一轮完成 → 自动回传网页并发送 → 抓网页回复 → **只写入桌面草稿**，绝不自动执行，是否继续由你定。三道安全阀：最大轮数 / 错误关键词熔断 / 同轮去重。
+- **全自动投递通道**（v1.4.0，可选）：桌面会话＝开发 agent、网页聊天＝审查 agent、你＝决策者，串成无人值守链条。审查回复**只提炼 `<TO_DEV>…</TO_DEV>` 区块投递**（网页全文绝不进桌面，省上下文和 Token），经官方 `conversation.send` **自动提交下一轮**；命中完成/重启/用户介入（如「请重启宿主验收」）/重复 2 次/错误/最大轮数即**弹决策卡**（继续/编辑/重试/终止），状态栏一键启停、随时接管。
+- **半自动带回**（可选）：不抓网页 DOM，改为手动粘贴网页回复或导出 JSON，绕开超时。
+- **设置页**：开关、改名、闭环与全自动配置、关于、检查更新、一键更新。
+- **稳定性**：webview 崩溃隔离，只在面板显示「重试」，不拖垮整个 App。
 
-- **三个入口并存**：
-  - 左侧栏图标入口，排在「插件」和「自动化任务」之间，点开后占满主内容区；
-  - 会话顶栏标签行（「对话 / 轨迹 / 上下文 / 压缩 / 编队 / 统计」那一行）新增标签，通过官方 `conversation.view` 槽注册（`id: deepseek-chat-view`、`order: 100`），**默认显示名「DeepSeek 聊天」**；
-  - **右边栏卡片（v1.1.7；v1.1.9 双路径）**：在右侧栏注册一张卡片（`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`、`order: 60`、单实例），**默认显示名「DeepSeek 聊天」**、直接复用网页聊天 webview。这是**双路径（v1.1.9 起）**：只以 better-sidebar 是否「正常运行」为准，正常时经 `registerTab` 注册、否则（含未安装 / 启动晚）直注 DSH 自带原生右侧栏 `sidebarRightTabs`；两路径互斥、服务晚到自动切换，不再需要手动开关，无需改依赖或注入声明。
-- **设置页面（v1.1.4，v1.1.7 扩为四项；v1.2.0 增第 4 张「自动闭环」卡片）**：通过官方 `settings.section` 槽注册「DeepSeek 聊天」设置页（左侧「设置」弹窗导航里）。基础四项设置（顶栏标签与右边栏卡片彼此独立）：
-  - **显示顶部标签栏**（默认开启）：关闭后移除顶栏标签，只保留左侧栏入口；
-  - **顶部标签栏名称**（默认 `DeepSeek 聊天`）：输入框默认**空白**，以灰色占位提示显示默认名；点进去不用删、直接输入新名字即可，留空自动恢复默认，最长 40 字；
-  - **显示右边栏卡片**（v1.1.7，默认开启）：关闭后注销当前路径的右边栏卡片（better-sidebar 或 DSH 原生右侧栏）；
-  - **右边栏卡片名称**（v1.1.7，v1.1.9 双路径，默认 `DeepSeek 聊天`）：同样是灰色占位提示、留空恢复默认、最长 40 字；`title` 用 thunk，改名即时生效，与顶栏名称互不影响。
-  - 配置存 `localStorage` 的 `dsh-plugin-deepseek-chat:config`（基础 `showTab` / `tabLabel` / `showCard` / `cardLabel` 四项，v1.2.0 增 `autoSyncEnabled` / `maxAutoLoops` / `errorKeywords` / 4 组选择器），改完即时生效（标签行 / 卡片会注册或注销、闭环按开关启停）。
-- **关于本插件（v1.1.5）**：设置页展示插件版本号、作者（`sweet560`）、功能简介、开源许可证（`MIT`），以及 npm 插件页面 / GitHub 仓库两个 `https` 外链（点开由桌面壳用系统浏览器打开）。
-- **检查更新（v1.1.5）**：设置页新增「检查更新」按钮，从 **npm 优先、GitHub 兜底** 两个公开 JSON 接口读取最新发布版本号（npm `dist-tags.latest`、`raw.githubusercontent.com` 上的 `package.json`），按数字逐段比较版本：已是最新 / 发现新版本 / 检查失败都给出文字状态，并附 npm / GitHub 跳转链接。检查中禁用重复点击，网络不可用或两源都失败都有兜底，不新增 Host 路由。
-- **一键更新（v1.1.10）**：与「检查更新」集成——只有**发现新版本**时，结果区（截图红框位置）才出现「立即更新」按钮；点击后真调用 DSH Host 官方通道 `pluginManager.updateBundle(包名, 新版本)` 自动替换组合包，并按返回结果用中文如实显示「更新完成 / 已安装请重启 DSH 生效 / 更新失败：<原因>」。`remote` 用 `ctx.get` 软读、不写进 `inject`（避免冷启动把整个插件 park）；本机 `link:` 本地安装会被官方 `updateRefusal` 拒绝，此时如实提示并保留 npm / GitHub 手动更新跳转链接。
-- **条件触发式自动闭环（v1.2.0，默认关闭）**：在设置页开启后，桌面端一轮执行完成（`turn/end`）→ 自动把本轮 agent 回答填入 DeepSeek 网页输入框并发送 → 自动等网页生成完成（停止按钮「有→无」）→ 抓取网页回复 → **只写入桌面草稿**（`setDraft`，绝不自动执行）→ 是否点「继续/运行」由你决定。「自动」只在搬运和发送，决定权始终在你手里。三道安全阀：总开关 + 最大轮数、错误关键词熔断、同轮去重；停止/发送/输入框/助手消息 4 组选择器可在设置页配置；双向搬运走 `<webview>.executeJavaScript` 页面桥 + `ctx.get("sessions").binding().eventSource` 官方契约，不改 DSH 本体、不消耗额外 API 额度。
-- **半自动带回（v1.2.1，默认关闭）**：借鉴官方内置实验性插件 `@deepseek-ai/dsh-deepseek-chat-import` 的结构化解析语义（不抓网页 DOM），新增 `halfAutoEnabled` 子模式——通道 A 仍自动把桌面回答回传网页并发送，send 成功后**跳过等待网页 DOM 停止按钮 / 180s 超时**，改为在面板状态条显式等你在网页侧复制回复（或导出会话 JSON）粘回；`extractExportReply()` 按 `current_message_id` 选分支、只取 `RESPONSE` fragment 的 `FINISHED` 回答（跳过 `CONTENT_FILTER` / 模板 / 思考），`bringBackReply()` 把结果**只写入桌面草稿**（`setDraft`，绝不 `submit`）、补齐闭环追踪四阶段并 `acknowledge()` 回到 idle。对症实机「网页回复抓取两次 180s 超时」的痛点，是 DOM 通道失败时的稳健替代；默认关闭、v1.2.0 全自动路径零回归、不消耗额外 API 额度。
-- **自动发送修复（v1.2.2）**：修复实机「内容填入网页输入框后无法自动发送」——旧版把点击发送 / 键盘兜底整体包在 `requestAnimationFrame` 里，DeepSeek `<webview>` 被遮挡 / 隐藏时 Chromium 把 rAF 节流为 0，回调永不执行，于是只填入不发送。v1.2.2 改为**同步立即点击发送按钮** + `window.setTimeout` 按 `[120,320,700,1400,2800]ms` 重试（覆盖 React 受控按钮延迟 enable）+ 通用按钮扫描（`button, [role='button'], [data-testid]` 中含「发送 / 送出 / Send / Submit」文案）+ **普通 Enter 优先、未清空才补 Ctrl+Enter** 键盘兜底；输入框被清空视为「真实已发送」信号，停止重试。实际采用的 `method` 写入 loop-trace 的 `lastSendMethod` 供实机复核。用户已确认「手动发送后网页回复会自动传回桌面输入框」= 回传链全通，本次只补这最后一环；不改 DOM 抓取 / 三道安全阀 / `setDraft` 不 submit。
-- **发送确认（v1.2.3）**：把「send 报 ok」升级为「确认用户消息真的出现在网页消息流」——`fillAndSend` 记录发送前用户消息节点数，延迟 `SEND_CONFIRM_DELAY=3500ms`（> 最晚重试 2800ms）后回读 `confirm()`：出现新用户消息节点（`via=node`）或输入框已清空（`via=cleared`）即确认成功；两者皆无则 `confirmed=false` 显式进入 `error(unconfirmed)` 上报，状态条显示「再试一次」按钮（`retryPush()` 重发上一条、不增加轮次不重复去重）。新配置字段 `userMessageSelectors`（默认 `[data-message-author-role="user"]`，可在设置页自定义）供节点计数；确认结果写入 loop-trace 的 `lastSendConfirmed / lastSendConfirmVia / lastSendUserMsgDelta`。不改变主流程、不触发 `submit()`，手写桥桩零回归。
-- **v1.2.3 回归修复（v1.2.4）**：v1.2.3 的发送确认在实机上会假阴性——DeepSeek 无 `[data-message-author-role="user"]` 节点、输入框又残留草稿，`via=none` 触发 `noteError` 把 state 从 waiting 翻成 error，掐断了仅在 waiting 存活的回复轮询，导致「网页回复已生成完却抓不回桌面」。v1.2.4 把确认降级为纯观测（只写 loop-trace，不改 state），失败上报交给 180s 回复窗口真实超时；「再试一次」按钮改为只在 send 真失败时出现。L 段新增回归防线断言锁住该行为。
-- **跨会话串台修复（v1.2.5）**：修复实机「切到别的会话后，该会话的回答被自动搬进网页端」以及「切走配对会话后这一轮不触发」两类现象（同一 bug 两面）。根因：闭环组件注册在全局 `conversation.composer.dock`，`makeSyncDock` 订阅当前 composer 会话的 `turn/end`、无「只认配对会话」过滤，切到哪个会话就搬哪个会话的回答；`injectDraft` 又不校验 `dock.sessionId`，会把网页回复写进错误会话草稿。v1.2.5 让闭环**同一时刻只服务首次 turn/end 锁定的配对会话**：非配对会话的 turn/end 在入口即丢弃、`injectDraft` 校验会话不符则拒绝；切走配对会话 → 显式 `paused(switched-away)` 并在状态条显示「已绑定会话 X / 已暂停 / 换绑」（让「没搬运」从无声故障变成可见预期状态），切回自动恢复（中间态归 idle，需用户继续）。M 段 9 条断言覆盖配对锁定 / 会话过滤 / 注入校验 / 切走暂停 / 换绑。
-- **切会话后闭环照常走（v1.2.6）**：v1.2.5 的 A 方案（切走即暂停）虽消除了串台，但实机「切会话后流程不触发」。v1.2.6 改为 B 方案——闭环继续跟随**首次 turn/end 锁定的配对会话**运行，切到别的会话**不中断订阅、不串入别的会话内容**。两处关键改动：① **订阅所有权上移**——事件订阅从 composer dock 的 effect（原来切走即停）上移到 runtime，按配对会话 id 定向 `sessions.binding(paired).eventSource`，配对后切走当前会话不换订、不停订；② **草稿注入会话定向**——改用官方 `conversation.input.requestDraftInitialization(binding, {prompt, whenDraftExists:'replace'})`（DSH 自身在导航切换时即用此 API），把网页回复写进**配对会话自己的草稿**，不再经当前 composer，杜绝反向串台；仅当该 API 不可用（旧 DSH / 未绑定）才回退旧 `setDraft`。状态条改为「闭环仍在配对会话运行 — 回复已注入该会话草稿；切回查看」。前提：切会话是导航、未关闭会话 A；若会话 A 被关闭需点「换绑」。N 段 9 条断言覆盖会话定向 API 调用 / binding 失效 / 防反向串台 / 订阅上移不换订。详见 CHANGELOG 1.2.6 节。
-- **图3 修复：网页铺满会话区（v1.1.4）**：选中顶栏标签时，网页现在撑满整个会话区、盖住 DSH 自己的对话消息与底部输入框；切回「对话」标签即恢复。顶栏入口用不透明绝对定位浮层（`inset: 0`、`z-index: 50`）覆盖会话 body，header 里的标签行仍在上方、随时可点回。
-- 两个入口**共用同一个网页聊天组件**（顶栏多一层铺满浮层包装）和同一个固定分区 `panel:deepseek-chat`，登录态与会话记忆通用；切走标签页会释放租约、再进入重新申请同一分区。
-- 会话区全宽内嵌 `https://chat.deepseek.com/`（Electron `<webview>`，走桌面壳的 guest 租约桥 `window.dshDesktop.browser`）。
-- **记住上次会话**：切到别的面板、切换会话、重启 App 后再进来，直接回到上次那条对话，而不是新对话。
-- 登录/鉴权页不会覆盖记忆；记住的会话失效或打不开时自动回退到首页。
-- **稳定的登录会话（v1.1.1 修复）**：guest 分区固定为 `panel:deepseek-chat`，切换面板/会话回来不会重建分区、不会重新要求扫码。
-- **崩溃隔离**：内嵌页进程退出、被销毁或启动超时，只在面板里显示「重试」，不会再出现整个 App 变空白窗口的问题（v0.4.0 修复，见下文）。
-- **纯网页聊天（v1.1.3）**：已彻底移除账号状态条、账号探测、5 秒轮询与账号同步 store；面板挂载即申请租约、立即启动，不再等待任何异步账号流程。
-- 纯 Web 表层（`dsh web` 在浏览器里打开）自动不注册——该站点 `frame-ancestors 'none'`，iframe 嵌不了，guest 租约桥也只有桌面壳提供。
-
-> **v1.1.2 修复（web boot 启动失败）**：v1.1.1 把 npm 包名改为带 scope 的 `@tianyulinfeng1/dsh-plugin-deepseek-chat` 后，`lib/client.js` 里 client bundle 的工厂 id 仍是旧短名 `dsh-plugin-deepseek-chat`，两者不一致使 DSH Host 重复执行同一 bundle、抛出 `duplicate factory registration`，最终 `web boot: 1 entry did not activate`、整个页面启动失败。v1.1.2 已把工厂 id 对齐为完整包名，并在离线自检中新增「工厂 id 必须等于 `package.json` 的 `name`」回归断言。详见 [docs/RELEASE_NOTES_v1.1.2.md](docs/RELEASE_NOTES_v1.1.2.md)。
-
-> **v1.1.3**：按用户要求移除账号状态显示、新增会话顶栏「网页聊天」标签页；旧的 main / sidebar.panellist 两处 inject 从「同一个 try/catch」改为三处各自独立 try/catch，避免单点失败连带其它入口不注册。
-
-> **v1.1.4**：新增设置页（开关顶部标签栏 + 自定义标签名，默认「DeepSeek 聊天」）；修复选中顶栏标签时网页没有铺满会话区、DSH 输入框仍露在下方的问题；图2 红框（网页内自带会话标题胶囊）经用户确认「先不处理」，插件不改动第三方网页。
-
-> **v1.1.5**：设置页新增「关于本插件」基础信息（版本号 / 作者 / 功能简介 / 许可证 / npm·GitHub 链接）与「检查更新」按钮（npm 优先、GitHub 兜底、语义版本比较、文字状态 + 跳转链接、失败兜底）；不改动 Host 半侧。
-
-> **v1.1.6**：纯发布链路测试（OIDC 可信发布），功能与 1.1.5 相同。
-
-> **v1.1.7**：按 `dsh-better-sidebar` 原理新增右边栏卡片（软探测 `ctx.get('betterSidebar')` + `registerTab`、`title` thunk 即时改名、`ctx.effect` 持有 disposer），设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。
-
-> **v1.1.8**：修复右边栏卡片不出现的 bug——v1.1.7 在 `apply()` 里一次性 `ctx.get("betterSidebar")` 且不声明 `inject`，若 `dsh-better-sidebar` 的 `ctx.provide` 稍晚执行，Cordis 只唤醒声明过该服务的 fiber，软探测的插件永远不会被重试，卡片就注册不上（设置页「侧边栏内容」里也看不到）。v1.1.8 改为**每次重读服务 + 有上限、可取消的就绪重试**（浏览器全局 timer、`ctx.effect` 卸载时清理），服务晚到也能自动注册；未安装 better-sidebar 时其余功能照常。支持版本更新到 DSH **0.2.2-rc.2**。详见 [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md)。
-
-> **v1.1.9**：修复「重启 DSH 后要到设置里手动关一次再开一次，右边栏卡片才出现」的 bug —— v1.1.8 的 20 秒有限就绪重试窗口会过期，而 better-sidebar 冷启动要等 Host 传输服务就绪才 `provide('betterSidebar')`，窗口耗尽后就不再重试，卡片一直注册不上。v1.1.9 改为**服务就绪事件 + 无界可取消兜底 + 每次重读**，三层任一到位即注册、不再需要手动开关；并按你的想法改成**双路径**：只以 better-sidebar 是否「正常运行」为准，正常走 `registerTab`，不正常（含未安装 / 启动晚）走 DSH 自带原生右侧栏 `sidebarRightTabs` 直注，两路径互斥、服务晚到自动切换。详见 [docs/RELEASE_NOTES_v1.1.9.md](docs/RELEASE_NOTES_v1.1.9.md)。
-
-> **v1.1.10**：设置页「检查更新」发现新版本后，在结果区（截图红框位置）新增「立即更新」按钮，点击真调 DSH Host 官方 `pluginManager.updateBundle` 一键替换组合包；按返回状态用中文如实提示「更新完成 / 已安装请重启 DSH 生效 / 更新失败：<原因>」，`remote` 走 `ctx.get` 软读、不写进 `inject`；本机 `link:` 安装被官方拒绝时如实说明并保留 npm / GitHub 手动更新链接。详见 [docs/RELEASE_NOTES_v1.1.10.md](docs/RELEASE_NOTES_v1.1.10.md)。
-
-> **v1.2.0（上一版）**：新增「条件触发式自动闭环」（默认关闭）——桌面执行完成自动回传网页并发送、网页回复完成自动抓取并只注入桌面草稿、是否继续跑始终由你判定；三道安全阀（总开关 + 最大轮数 / 错误关键词熔断 / 同轮去重）+ 4 组可配置选择器 + 面板状态条。因本机主进程 `will-attach-webview` 会清除自定义 `preload`、且没有 `dsh-hooks-bus`，实现改走 `<webview>.executeJavaScript` 页面桥 + `ctx.get("sessions").binding().eventSource.subscribe` 读 `'turn/end'` + `InputActions.setDraft()`（绝不 `submit`）等官方契约。全部改动落在插件边界内，默认关闭、按需开启。详见 CHANGELOG 1.2.0 节。
-
-> **v1.2.1（上一版）**：借鉴官方内置实验性插件 `@deepseek-ai/dsh-deepseek-chat-import` 的**结构化解析**语义（不抓网页 DOM），新增「半自动带回」子模式（默认关闭）——对症实机追踪里「网页回复抓取两次 180s 超时」的痛点：通道 A 仍自动把桌面回答回传网页并发送，send 成功后**跳过**等待网页 DOM 停止按钮 / 180s 超时，改为在面板状态条显式等你把网页回复（或官方导出的会话 JSON）粘回来；`extractExportReply()` 按 `current_message_id` 选分支、只取 `RESPONSE` fragment 的 `FINISHED` 回答（跳过 `CONTENT_FILTER` / 模板 / 思考），`bringBackReply()` 把结果**只写入桌面草稿**（`setDraft`，绝不 `submit`）、补齐闭环追踪四阶段并 `acknowledge()` 回到 idle。代价是多一步人工粘贴，收益是绕开 DOM 改版与超时；v1.2.0 全自动路径零回归、默认关闭、不消耗额外 API 额度。详见 CHANGELOG 1.2.1 节。
-
-> **v1.2.2（本版）**：修复实机「内容填入网页输入框后无法自动发送」——根因是旧版把点击发送 / 键盘兜底整体包在 `requestAnimationFrame` 里，DeepSeek `<webview>` 被遮挡 / 隐藏时 Chromium 把 rAF 节流为 0，回调永不执行，于是只填入不发送。v1.2.2 改为**同步立即点击发送按钮** + `window.setTimeout` 按 `[120,320,700,1400,2800]ms` 重试（覆盖 React 受控按钮延迟 enable）+ 通用按钮扫描 + **普通 Enter 优先、未清空才补 Ctrl+Enter** 键盘兜底，输入框被清空即视为「真实已发送」停止重试；实际采用的 `method` 写入 loop-trace 的 `lastSendMethod` 供实机复核。用户已确认「手动发送后网页回复会自动传回桌面输入框」= 回传链全通，本次只补这最后一环；不改 DOM 抓取 / 三道安全阀 / `setDraft` 不 submit。离线自检新增 K 段 8 条决定性断言（含 `rafRuns:false` 模拟隐藏 renderer 仍同步点击），H 端到端 / I 追踪 / J 半自动全绿，`RESULT: PASS`。详见 CHANGELOG 1.2.2 节。
-
-> **v1.2.3（本版）**：发送确认——send 报 ok 不代表网页真的提交了消息。v1.2.3 在 `fillAndSend` 记录发送前用户消息节点数，延迟 `SEND_CONFIRM_DELAY=3500ms` 后回读 `confirm()`：出现新用户消息节点（`via=node`）或输入框已清空（`via=cleared`）即确认成功；两者皆无则显式进入 `error(unconfirmed)` 上报，状态条显示「再试一次」按钮（`retryPush()` 重发上一条、不增加轮次不重复去重）。新增第 14 配置字段 `userMessageSelectors`（设置页可改），确认结果写入 loop-trace 的 `lastSendConfirmed / lastSendConfirmVia / lastSendUserMsgDelta`。零回归：不改主流程、不触发 submit、手写桥桩跳过确认。离线自检新增 L 段 10 条断言（节点确认 / 输入框清空降级 / 失败上报 / 再试一次 / 延迟回读），A–K 全段 `RESULT: PASS`。详见 CHANGELOG 1.2.3 节。
-
-> **v1.3.0（本版）**：状态栏新增「手动绑定」与「齿轮跳设置页」——① **手动绑定**：未配对时状态栏显示「绑定当前会话」按钮，点一下即把当前会话锁定为自动闭环目标，无需先跑一轮 turn/end 才配对；已配对时仍显示「换绑」。② **齿轮跳设置页**：状态栏最右侧新增描边齿轮按钮，点击直接打开本插件设置页并自动定位到「DeepSeek 聊天」section（复用官方 settings.open 命令 + 面板内导航点击，规避桌面端合成键盘事件被 native 键盘桥截断的问题）。③ **会话标题**：状态栏「已绑定到会话」由显示短 id 改为显示会话标题（取官方 `displayTitle`，取不到才回退短 id）。离线自检新增 M10 + O/P/Q 段断言（手动绑定 / 齿轮 / 会话标题 / 设置页定位），全段 `RESULT: PASS`。详见 CHANGELOG 1.3.0 节。
-
-> **v1.2.6（上一版）**：切会话后闭环照常走（B 方案）——闭环继续跟随首次 turn/end 锁定的配对会话运行，切到别的会话不中断订阅、不串入别会话内容。取证发现官方存在脱离当前 composer、对指定 `SessionBinding` 写草稿的 API（`conversation.input.requestDraftInitialization`），DSH 自身在导航切换时即用。两处改动：① 事件订阅从 composer dock 的 effect 上移到 runtime、按配对会话 id 定向（切走不换订不停订）；② 草稿注入改用该官方 API 写进配对会话自己的草稿（API 不可用才回退旧 `setDraft`），杜绝反向串台。状态条改为「闭环仍在配对会话运行 — 回复已注入该会话草稿；切回查看」。前提：切会话是导航、未关闭会话 A，否则需点「换绑」。N 段 9 条断言覆盖会话定向 API / binding 失效 / 防反向串台 / 订阅上移。详见 CHANGELOG 1.2.6 节。
-
-> **v1.2.5（上一版）**：修复跨会话串台——实机「切到别的会话后，该会话的回答被自动搬进网页端」+「切走配对会话后这一轮不触发」是同一 bug 两面（闭环组件挂在全局 `conversation.composer.dock`，订阅当前 composer 会话的 `turn/end` 且无会话过滤，`injectDraft` 也不校验 `dock.sessionId`）。v1.2.5 让闭环同一时刻只服务**首次 turn/end 锁定的配对会话**：非配对会话的 turn/end 入口即丢弃、`injectDraft` 会话不符则拒绝（防双向串台）；切走配对会话 → 显式 `paused(switched-away)`，状态条显示「已绑定会话 X / 已暂停 / 换绑」，让「没搬运」变成可见预期状态，切回自动恢复（中间态归 idle，需用户继续）。M 段 9 条断言覆盖配对锁定 / 会话过滤 / 注入校验 / 切走暂停 / 换绑。闭环服务单会话是设计预期，非故障。详见 CHANGELOG 1.2.5 节。
-
-> **v1.2.4**：修复 v1.2.3 的实机回归——发送确认的假阴性（`via=none`）曾 `noteError` 把等待态翻成出错态、掐断回复抓取轮询，导致「网页回复已生成完却没抓回桌面输入框」。v1.2.4 把确认降级为**纯观测**（只写 loop-trace 追踪，不改状态），失败上报交给 180s 回复窗口真实超时；「再试一次」按钮改为只在 send 真失败时出现。L 段新增回归防线断言（假阴性时 state 保持 waiting）。详见 CHANGELOG 1.2.4 节。
-
-> **闭环追踪与「触发+观测」验证脚本（v1.2.0 增补，dev-only）**：开启自动闭环后，插件会把各阶段时间戳写进 `localStorage` 的 `dsh-plugin-deepseek-chat:loop-trace`（`lastTurnEndAt` / `lastSendResult` / `lastResponseCompleteAt` / `lastDraftInjectedAt` 与阶段流水），**默认关闭时零写入**。`test/verify-runtime.cjs`（只读实机探针，G 段）与 `test/verify-loop-runtime.cjs`（零依赖「触发+观测」脚本）通过共享读取器 `test/lib/read-leveldb.cjs` 从桌面端 `Local Storage/leveldb` 读回四阶段做客观复核；三者均为 dev 工具，不进 npm 包。如实边界：本机没有 `dshx` / `dsh-exec`（无触发 turn 的 CLI），脚本「触发」为可选、缺失时诚实降级；renderer 沙箱无 Node fs，追踪载体是 `window.localStorage` 而非磁盘 JSON；脚本能证实「真实 TurnEnd 触发 + 回传/发送/抓取/注入动作序列」，但**最后一厘米**——草稿是否出现在 `<webview>` 网页输入框、有没有被自动执行——仍需肉眼确认（脚本无法访问 guest DOM）。
+> 各功能的来龙去脉、实现细节与逐版本变更见 [CHANGELOG.md](CHANGELOG.md)，当前版本详见 [RELEASE_NOTES_v1.4.0.md](docs/RELEASE_NOTES_v1.4.0.md)。
 
 ## 环境要求
 
@@ -94,146 +30,70 @@
 |---|---|
 | DSH | 桌面版 `0.2.2-rc.3` 或更新 |
 | 平台 | Windows / macOS / Linux 桌面壳 |
-| git | 仅「GitHub 安装」方式需要（pnpm 通过 git 拉取仓库） |
+| git | 仅 GitHub 安装方式需要 |
 
 ## 安装
 
-npm 包名：**`@tianyulinfeng1/dsh-plugin-deepseek-chat`**（GitHub 仓库名仍是 `dsh-plugin-deepseek-chat`）。
-
-### 方式一：npm（推荐）
+**方式一：npm（推荐）**
 
 ```powershell
 dsh plugin --profile desktop add @tianyulinfeng1/dsh-plugin-deepseek-chat
 ```
 
-插件页的「安装第三方插件」里也可以直接填包名 `@tianyulinfeng1/dsh-plugin-deepseek-chat`。
+**方式二：插件页** — DSH 左侧栏「插件」→「安装第三方插件」→ 填 `@tianyulinfeng1/dsh-plugin-deepseek-chat` 或 `github:sweet560/dsh-plugin-deepseek-chat` → 安装。
 
-### 方式二：插件页安装（GitHub）
-
-1. 打开 DSH 桌面版，左侧栏点 **插件**。
-2. 点列表上方的 **安装第三方插件**。
-3. 在「包名或地址」里填入：
-
-   ```
-   github:sweet560/dsh-plugin-deepseek-chat
-   ```
-
-   也可以填 `https://github.com/sweet560/dsh-plugin-deepseek-chat`。
-4. 点 **安装**，等 pnpm 跑完（首次会拉取仓库并安装依赖）。
-5. 安装完成后插件自动启用，左侧栏出现 **DeepSeek 聊天**。
-
-### 方式三：命令行（GitHub）
+**方式三：命令行（GitHub）**
 
 ```powershell
 dsh plugin --profile desktop add github:sweet560/dsh-plugin-deepseek-chat
 ```
 
-装完打开 **插件 → 已安装插件**，确认「DeepSeek 聊天」处于启用状态（命令行只负责装依赖，启用状态以插件页为准）。
-
-### 方式四：本地目录（二次开发）
+**方式四：本地目录（二次开发）**
 
 ```powershell
 dsh plugin --profile desktop add file:"<本仓库绝对路径>"
 ```
 
-## 关于「免扫码 / 与 DSH 账号同步」的真相
-
-**纯插件做不到让 chat.deepseek.com 直接复用 DSH 已登录的账号**，这不是实现遗漏，而是 DSH 的架构限制（已在 0.2.2-rc.1 源码中逐项核对）：
-
-| 项 | DSH 桌面版账号 | chat.deepseek.com 网页版 |
-|---|---|---|
-| 凭据 | platform.deepseek.com 的 `x-dsh-auth-token`（Host-only `getPlatformSession()`） | 站点自带的 Token（`api/v0/users/current` 无 token 返回 `40002 Missing Token`） |
-| 存放 | Host 进程凭据存储 | guest session 的 httpOnly cookie |
-| 兑换入口 | **无**；归档中 `chat.deepseek.com` 零引用，无 SSO、无 cookie 注入 | — |
-
-- 渲染层桥 `globalThis.dshDesktop` 只有 `browser.acquire/release/onOpenRequested` 等，**没有** `getAuthToken`、写 cookie、打开 Platform 取 token 的 API；`getAuthToken()` 只存在于桌面壳内嵌 Platform 页（`usage` / `top_up`）的专用 preload，且受主帧 + origin 限制。
-- `browserAcquire` IPC 只按 workspace 字符串分配分区/租约，`configureSession()` 只设权限与下载拦截，**不注入任何凭据**；guest 被强制 `sandbox/contextIsolation/webSecurity`。
-- 因此：DSH 账号与网页版登录态互不相干，首次仍需在网页里扫码一次。**v1.1.3 起连「账号状态」的展示也一并删除**，面板是纯网页聊天。
-
-**v1.1.0 的教训（v1.1.1 已修复，v1.1.3 已彻底移除账号逻辑）**：曾把 guest 分区绑到异步账号探测结果上。DSH 的 `getState()` 在重连/切会话时会瞬时失败，分区一变就等于换了个全新 cookie 罐 → 每次切回面板都要求重新扫码。现在：
-
-- `acquire()` 的 workspace 恒为 `panel:deepseek-chat`，会话记忆 key 恒为 `dsh-plugin-deepseek-chat:last-url`；
-- 不再有任何账号探测、轮询、状态订阅或显示条参与 guest 生命周期；
-- guest 在挂载时立即启动，不等任何异步 Remote 流程；
-- 弹窗导航只放行 `chat.deepseek.com` 与 `platform.deepseek.com`（HTTPS、默认端口）。
-
-> 想做到「重启 DSH 后也不用重新扫码」，需要按 [docs/login-persistence.md](docs/login-persistence.md) 把 DSH 的随机内存分区改成**确定性的 `persist:` 分区**（运行 [scripts/patch-dsh-persistent-partition.cjs](scripts/patch-dsh-persistent-partition.cjs)，属修改已安装应用，风险自负）。**该脚本会同步 `0.2.2-rc.1` 的 ASAR 逐文件 SHA256 integrity**，纯字节替换会让 DSH 重启崩溃，切勿使用废弃的 `.mjs` 版本。补丁要求完全退出 DSH 后才能写入 `app.asar`，且只解决「重启后保留网页 cookie」，不能让网页复用 DSH token。
+装完在「插件 → 已安装插件」确认「DeepSeek 聊天」已启用。
 
 ## 使用
 
-- 第一次打开会停在 chat.deepseek.com 的登录页，登录一次即可。
-- 本次 App 运行期间，切换面板/会话**不需要**重新登录（v1.1.1 起分区固定）。
-- **重启 DSH 后仍需要重新登录一次**：DSH 目前给内嵌浏览器的是随机内存分区（`dsh-sidebar-browser-<uuid>`，没有 `persist:` 前缀），进程退出即清空 cookie。本插件不修改 DSH 的安装文件；想做到「登录一次、长期免登录」，可按 **[docs/login-persistence.md](docs/login-persistence.md)** 做一次等长字节替换（含脚本、验证与回滚）。
-- 会话链接记在 App 的 localStorage（固定 key `dsh-plugin-deepseek-chat:last-url`），重启后仍会打开上次的会话（前提是已登录且该会话仍存在）。
-- 会话顶栏标签（默认 **「DeepSeek 聊天」**）、左边栏图标与右边栏卡片是同一份网页聊天；切到别的标签时本插件的 guest 会被卸载并释放租约，切回来重新加载（分区不变，登录态与会话记忆保留）。
-- **设置页面**：打开 DSH「设置」弹窗 → 左侧导航「DeepSeek 聊天」，可分别勾选 / 取消「显示顶部标签栏」与「显示右边栏卡片」、分别修改「顶部标签栏名称」与「右边栏卡片名称」（互不影响）。两个名称输入框默认是空白的，只用灰色文字提示「DeepSeek 聊天」；点进输入框即可直接输入新名字，无需先删除默认文字。关闭标签栏后顶栏入口消失、关闭卡片后右边栏 Tab 被注销，但左侧栏图标始终可用；名字留空自动恢复默认「DeepSeek 聊天」。设置即时生效并保存在本机。
-- **右边栏卡片**：需已安装并启用 `dsh-better-sidebar`（本机即 0.30.1）。在「设置 → 侧边卡片 → ＋ 添加 Tab 插件」里能看到本插件注册的卡片；未安装 better-sidebar 时该卡片不出现，其它入口照常。卡片名称用 thunk，改名即时反映到卡片标题。
-- **关于与检查更新**：同页下方展示版本号、作者、功能简介、许可证与 npm / GitHub 链接；点「检查更新」会从 npm（失败则 GitHub）读取最新发布版本号。本地未发版的新版本会领先远端，显示「已是最新版本」；远端更高则显示「发现新版本 x.y.z」，结果下方附有跳转链接；网络不可用会显示失败原因。
-- 选中顶栏标签时网页铺满整个会话区，DSH 自己的对话消息与输入框被盖住；点回「对话」标签即恢复，不会丢失会话内容。
+- 首次打开在 chat.deepseek.com 登录一次；本次 App 运行期间切面板/会话无需重登。
+- **重启 DSH 后需重新登录**（DSH 给内嵌浏览器的是内存分区，退出即清 cookie）。想长期免登录见[登录态持久化](#登录态持久化可选免登录)。
+- 会话链接记在 localStorage（key `dsh-plugin-deepseek-chat:last-url`），重启后回到上次会话。
+- 设置页：DSH「设置」→ 左侧「DeepSeek 聊天」，可独立开关/改名顶栏标签与右边栏卡片、配置自动闭环与全自动通道，即时生效。
+- 选中顶栏标签时网页铺满会话区，点回「对话」恢复。
+
+## 关于「免扫码 / 与 DSH 账号同步」
+
+纯插件**做不到**让网页版复用 DSH 已登录账号——这是 DSH 架构限制：DSH 账号凭据在 Host 进程（`x-dsh-auth-token`），网页版用站点自带 cookie token，两者无兑换入口，渲染层桥也没有写 cookie / 取 token 的 API。故首次仍需在网页扫码一次。v1.1.3 起面板不再显示任何账号状态。
 
 ## 登录态持久化（可选，免登录）
 
-DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-${randomUUID()}`，无 `persist:` 前缀），所以每次重启 App 都会清空 cookie。想做到「登录一次、以后不再登录」，需要把桌面主进程里的那行分区名改成固定且带 `persist:` 前缀的值——两条语句**字节数相同**，可以直接在 `resources/app.asar` 里原地替换。
+DSH 默认给内嵌浏览器分配内存分区（`dsh-sidebar-browser-<uuid>`），重启即清 cookie。可把主进程那行改成固定 `persist:` 分区（两条语句字节数相同，原地替换）实现长期免登录。
 
-完整原因、脚本、验证步骤、回滚方式和各平台路径都整理在这里：
-
-**→ [docs/login-persistence.md](docs/login-persistence.md)**
-
-`scripts/` 随插件分发两个「新电脑免改」的批处理，换电脑、DSH 装在别处都无需改路径：
-
-- `scripts/一键补丁.bat`：自动定位 DSH 安装位置、自动关闭 DSH、先 `--dry-run` 全量体检再打补丁，可选重启。
-- `scripts/回滚.bat`：自动定位、取最新 `.bak-*` 备份恢复，先留 `.pre-rollback` 现场、失败自动退回并 dry-run 校验。
-- `scripts/find-dsh.ps1`：两份 bat 共用的路径探测（纯 ASCII）——注册表卸载项 → 运行中的 DSH 进程 → 常见安装根/盘符扫描 → 从插件目录回溯，找不到才提示把安装文件夹拖进窗口；优先用 DSH 自带 node，无需另装 Node.js。两份 bat 正文为纯 ASCII，中文 / UTF-8 控制台下都可用。
-
-注意：这属于对已安装应用的修改，不在 DSH 支持范围内；DSH 升级会覆盖 `app.asar`，需要重新打补丁（`Partitions` 里的登录数据不会丢）。请先备份，风险自负。
+完整原因、脚本、验证与回滚步骤见 **[docs/login-persistence.md](docs/login-persistence.md)**。`scripts/` 附「新电脑免改」批处理：`一键补丁.bat` / `回滚.bat` / `find-dsh.ps1`（自动定位 DSH、dry-run 体检、备份回滚）。属修改已安装应用，DSH 升级会覆盖 `app.asar` 需重打补丁，风险自负。
 
 ## 已知限制
 
-- chat.deepseek.com 会检测 Electron 内嵌环境，偶尔弹出「使用环境异常…建议使用官方产品」的提示；这是站点侧行为，与本插件无关。
-- 仅桌面版有效；`dsh web` 在浏览器里打开时不显示入口。
-- 站点若调整会话 URL 规则（当前识别 `/a/chat/s/<id>` 形式），「记住会话」可能失效并回退到首页。
-- 纯插件无法免扫码复用 DSH token；首次仍需在该网页登录一次（见上文）。**v1.1.3 起面板不再显示任何账号状态。**
-- 重启 DSH 后仍需重新登录网页版 chat，除非按 [docs/login-persistence.md](docs/login-persistence.md) 打持久分区补丁。
-
-## 崩溃隔离（v0.4.0）
-
-早期版本出现过：点开面板、聊天页正常显示 1~2 秒后**整个 App 变成空白窗口**（只剩原生菜单和窗口按钮），没有崩溃对话框也没有 `crash-*.log`。
-
-根因是 React 卸载面板时**先移除 DOM、后执行 effect 清理**，而 Electron 的 `<webview>` 一旦脱离文档，`getURL()` 就会抛错；DSH 把插件里任何未捕获异常都当作 `slot entry crashed in 'root'`，直接卸载 `root` slot —— 整个 App UI 因此消失。
-
-现在的实现：
-
-- 所有 guest 调用先判断 `element.isConnected` 再 `try/catch`，清理阶段「先读 URL、再移除元素」；
-- 每个事件处理器都包 `try/catch`，异常只落在面板自己的状态里；
-- 面板外包一层 React 错误边界；
-- 监听 `render-process-gone` / `destroyed` / `did-fail-load`，失败时**先移除失效的 guest 元素**再显示「重试」，避免重试叠加 webview；
-- 15 秒启动看门狗，guest 一直不 `dom-ready` 就转重试卡片；
-- 事件监听器若注册失败则不启动 guest；弹窗 URL 走白名单校验（v1.1.0）。
+- 仅桌面版有效；`dsh web` 在浏览器打开时不显示入口。
+- chat.deepseek.com 偶尔弹「使用环境异常」提示，属站点行为，与本插件无关。
+- 纯插件无法免扫码复用 DSH token（见上）。
+- 重启 DSH 后需重登网页，除非打持久分区补丁。
 
 ## 版本历史
 
-| 版本 | 内容 |
+只列重要里程碑，完整逐版本变更见 **[CHANGELOG.md](CHANGELOG.md)**，各版本发布说明见 [docs/](docs/)：
+
+| 版本 | 里程碑 |
 |---|---|
-| **1.3.0** | **手动绑定 + 状态栏齿轮跳设置页 + 会话标题**：未配对时状态栏「绑定当前会话」按钮一键锁定配对会话（无需先跑一轮）；最右侧齿轮按钮直接打开插件设置页并定位「DeepSeek 聊天」section（复用官方 settings.open + 面板内点击，规避桌面端合成键盘被 native 桥截断）；「已绑定到会话」显示官方 `displayTitle` 会话标题（取不到回退短 id）。M10+O/P/Q 段断言。详见 CHANGELOG 1.3.0 节。 |
-| | **1.2.6** | **切会话后闭环照常走（B 方案）**：订阅上移到 runtime、按配对会话 id 定向（切走不换订不停订）；草稿注入改用官方 `conversation.input.requestDraftInitialization(binding,{prompt,whenDraftExists:'replace'})` 写进配对会话自己的草稿（API 不可用才回退旧 `setDraft`），杜绝反向串台；状态条「闭环仍在配对会话运行 — 回复已注入该会话草稿；切回查看」。前提：切会话=导航未关闭会话 A，否则需「换绑」。N 段 9 条断言。详见 CHANGELOG 1.2.6 节。 |
-| | **1.2.5** | **跨会话串台修复**：闭环只服务首次 turn/end 锁定的配对会话——非配对会话 turn/end 入口即丢弃、`injectDraft` 校验 `dock.sessionId` 不符则拒绝（防双向串台）；切走配对会话 → `paused(switched-away)` + 状态条「已绑定会话 X / 已暂停 / 换绑」，切回自动恢复（中间态归 idle）。M 段 9 条断言覆盖配对锁定 / 会话过滤 / 注入校验 / 切走暂停 / 换绑。闭环服务单会话是设计预期，非故障。详见 CHANGELOG 1.2.5 节。 |
-| | **1.2.4** | **修复 v1.2.3 实机回归**：发送确认假阴性（`via=none`，DeepSeek 无 user 消息节点 + 输入框残留草稿）曾 `noteError` 把 waiting 翻成 error、掐断仅在 waiting 存活的回复轮询，导致「网页回复已生成完却抓不回桌面」。v1.2.4 把确认降级为纯观测（只写 loop-trace，不改 state），失败上报交给 180s 真实超时；「再试一次」改为只在 send 真失败时出现。L 段新增回归防线断言。详见 CHANGELOG 1.2.4 节。 |
-| **1.2.3** | **发送确认（从「send 报 ok」升级为「确认用户消息真的出现在网页消息流」）**：`fillAndSend` 记录发送前用户消息节点数，延迟 `SEND_CONFIRM_DELAY=3500ms` 后回读 `confirm()`：出现新用户消息节点（`via=node`）或输入框已清空（`via=cleared`）即确认成功；两者皆无则显式进入 `error(unconfirmed)` 上报，状态条显示「再试一次」按钮（`retryPush()` 重发上一条、不增加轮次不重复去重）。新增第 14 配置字段 `userMessageSelectors`（设置页可改），确认结果写入 loop-trace 的 `lastSendConfirmed / lastSendConfirmVia / lastSendUserMsgDelta`。零回归：不改主流程、不触发 submit、手写桥桩跳过确认。离线自检新增 L 段 10 条断言，A–K 全段 `RESULT: PASS`。详见 CHANGELOG 1.2.3 节。 |
-| **1.2.2** | **自动发送修复（对症实机「填入网页输入框但无法自动发送」）**：根因是旧版把点击发送 / 键盘兜底整体包在 `requestAnimationFrame` 里，DeepSeek `<webview>` 被遮挡 / 隐藏时 Chromium 把 rAF 节流为 0，回调永不执行 → 只填入不发送（实机 loop-trace 两次 180s `state:timeout` 即源于网页从未开始生成）。v1.2.2 移除 rAF，改为**同步立即点击发送按钮** + `window.setTimeout` 按 `[120,320,700,1400,2800]ms` 重试（覆盖 React 受控按钮延迟 enable）+ 通用按钮扫描（`button, [role='button'], [data-testid]` 含「发送 / 送出 / Send / Submit」文案）+ **普通 Enter 优先、未清空才补 Ctrl+Enter** 键盘兜底；输入框被清空即视为「真实已发送」停止重试；`method` 写入 loop-trace 的 `lastSendMethod` 供实机复核。用户已确认「手动发送后网页回复自动传回桌面输入框」= 回传链全通，本次只补最后一环；不改 DOM 抓取 / 三道安全阀 / `setDraft` 不 submit。离线自检新增 K 段 8 条决定性断言（含 `rafRuns:false` 模拟隐藏 renderer 仍同步点击），H 端到端 / I 追踪 / J 半自动全绿，`RESULT: PASS`。详见 CHANGELOG 1.2.2 节。 |
-| **1.2.1** | **半自动带回（借鉴官方内置实验性插件的结构化语义）**：参考昨天更新的 `@deepseek-ai/dsh-deepseek-chat-import`（解析 `export_format_version:3` 导出 JSON，而非抓网页 DOM），新增 `halfAutoEnabled`（默认关闭）——通道 A 仍自动回传发送，send ok 后跳过 DOM 轮询 / 180s 超时，由用户在状态条粘贴网页回复或官方导出会话 JSON，`extractExportReply()` 按 `current_message_id` 选分支、只取 `RESPONSE` 的 `FINISHED` 回答（跳过 `CONTENT_FILTER` / 模板 / 思考），`bringBackReply()` 只写 `setDraft()` 注入草稿（绝不 `submit`）+ 补齐追踪四阶段 + `acknowledge()` 回 idle。对症实机两次 `state:timeout`，默认关闭、v1.2.0 全自动路径零回归。离线自检新增 J 段 14 条断言（官方 JSON 分支 / 纯文本 / 非 FINISHED / 跳过 DOM 轮询 / 只写草稿 / 追踪四阶段），`RESULT: PASS`。详见 CHANGELOG 1.2.1 节。 |
-| **1.2.0** | **条件触发式自动闭环**：桌面 `turn/end` 完成 → 自动回传网页并发送 → 等停止按钮消失抓回复 → 只写桌面草稿（`setDraft` 不 `submit`）→ 等你判定是否继续。三道安全阀（总开关 + `maxAutoLoops` / 错误关键词熔断 / 同轮去重）、4 组可配置选择器、面板状态条、设置页第 4 卡、`autoSyncEnabled` 默认关闭。因主进程封死 `preload` / `ipcRenderer.sendToHost`、且无 `dsh-hooks-bus`，改走 `<webview>.executeJavaScript` 页面桥 + `sessions.binding().eventSource`（`'turn/end'`）+ `InputActions.setDraft()` 官方契约。离线自检在模拟 DOM 里真跑两条通道 + 全阀门断言，`RESULT: PASS`。 |
-| **1.1.10** | **设置页「一键更新」**：与「检查更新」集成，只有发现新版本时结果区才出现「立即更新」按钮；点击真调 Host 官方 `pluginManager.updateBundle(包名, 版本)`，按 `ChangeResult.application` 用中文如实提示更新完成 / 需重启 / 失败原因，`remote` 走 `ctx.get` 软读不写进 `inject`，本机 `link:` 安装被拒时保留 npm / GitHub 手动更新跳转链接。离线自检新增「found 才出按钮 / 真调 updateBundle 且参数正确 / applied / restart-required / link: 被拒如实提示 / 无通道 / 兜底链接」断言，全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.10.md](docs/RELEASE_NOTES_v1.1.10.md)。 |
-| **1.1.9** | **修复重启后需手动开关才出卡片 + 右边栏卡片双路径**：v1.1.8 的「500ms×40≈20 秒」有限重试窗口会过期（better-sidebar 冷启动要等 `remote` / `remote.session` / `connection` 等 Host 服务就绪、fiber 才 active、`ctx.provide('betterSidebar')` 才发生），窗口耗尽后不再注册——这就是每次重启都要手动关一次再开一次的原因。v1.1.9 改为 `ctx.on('internal/service', {global:true})` 服务就绪事件 + 无界可取消 500ms 兜底 + 每次 sync 重读，三层任一到位即注册；并按用户要求改为**双路径**：只以 `ctx.get('betterSidebar')` 是否可用（「正常运行」）为准，可用走 better-sidebar `registerTab`，不可用（含未装 / 启动晚）走 DSH 原生 `sidebarRightTabs` 直注（type + `sidebar.right.pane.tab` 正文槽），两路径互斥、服务晚到自动切换。离线自检新增「两服务全缺席 / 互斥 / 原生直注契约 / 事件切换 / 无界 timer / cleanup」断言，全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.9.md](docs/RELEASE_NOTES_v1.1.9.md)。 |
-| **1.1.8** | **修复右边栏卡片不出现的加载顺序竞态 + 支持 DSH 0.2.2-rc.2**：v1.1.7 在 `apply()` 里一次性 `ctx.get("betterSidebar")` 且不声明 `inject`，若 `dsh-better-sidebar` 的 `ctx.provide` 稍晚，Cordis 只唤醒声明过该服务的 fiber，软探测的插件永远不会被重试，卡片就注册不上（设置页「侧边栏内容」里也看不到）。v1.1.8 改为**每次重读服务 + 有上限、可取消的就绪重试**（浏览器全局 timer，`ctx.effect` 卸载时清理），服务晚到也能自动 `registerTab`；未安装 better-sidebar 时其余功能照常。支持版本标注更新到 DSH `0.2.2-rc.2`（崩溃日志原文与旧发布说明保留 rc.1）。离线自检新增「服务晚到也能注册 / 重试有上限 / cleanup 取消 timer」断言，全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.8.md](docs/RELEASE_NOTES_v1.1.8.md)。 |
-| **1.1.7** | **新增右边栏卡片（dsh-better-sidebar）**：`ctx.get('betterSidebar')` 软探测 + `registerTab`（`id: @tianyulinfeng1/dsh-plugin-deepseek-chat:card`、`order: 60`、复用网页聊天 webview），`title` thunk 即时改名、`ctx.effect` 持有 disposer；设置页新增「显示右边栏卡片」开关与「右边栏卡片名称」输入框（默认「DeepSeek 聊天」，与顶栏独立）；零新增依赖、不改注入声明。离线自检全部通过（`RESULT: PASS`）。详见 [docs/RELEASE_NOTES_v1.1.7.md](docs/RELEASE_NOTES_v1.1.7.md)。 |
-| **1.1.6** | **OIDC 可信发布链路测试**：`.github/workflows/publish.yml` 启用 `permissions.id-token: write`、Node 24（Active LTS）、`npm@latest`、`npm publish --provenance`，移除 `NODE_AUTH_TOKEN` 与 `environment` 声明；版本号升到 `1.1.6` 推送 GitHub，实测 GitHub Actions 能否经 npm Trusted Publisher 自动发布。功能与 1.1.5 相同，仅发布链路变更。 |
-| **1.1.5** | **设置页新增关于信息 + 检查更新**：新增插件版本号 / 作者 / 功能简介 / 许可证 / npm·GitHub 链接，以及「检查更新」按钮（npm `dist-tags` 优先、GitHub `raw` 兜底、数字逐段版本比较、文字状态 + 跳转链接、8 秒超时与失败兜底）；元信息常量与 `package.json` 一致性断言、离线自检全部通过（`RESULT: PASS`）。 |
-| **1.1.4** | **新增设置页 + 顶栏标签可配置 + 网页铺满会话区**：新增 `settings.section` 设置页（开关顶部标签栏、自定义标签名默认「DeepSeek 聊天」，localStorage 持久化、即时重注入刷新标签行）；顶栏标签用不透明绝对定位浮层铺满会话 body、盖住 composer 输入框；图2 网页内标题胶囊按用户确认不处理。四处槽位注册、离线自检全部通过（`RESULT: PASS`）。 |
-| **1.1.3** | **移除账号状态显示 + 新增会话顶栏标签页**：彻底删除账号状态条、账号探测、5 秒轮询、账号同步 store；新增 `conversation.view` 顶栏「网页聊天」标签（与左侧栏/全屏面板共用组件与固定分区）；三处槽位注册改为各自独立 try/catch。离线自检全部通过（`RESULT: PASS`）。 |
-| **1.1.2** | **修复 v1.1.1 的 web boot 启动失败（重点）**：工厂 id 与 npm 包名不一致 → DSH 重复执行同一 bundle → `duplicate factory registration` → `1 entry did not activate`、整个页面打不开。已把 `lib/client.js` 工厂 id 对齐为 `@tianyulinfeng1/dsh-plugin-deepseek-chat`，并新增「工厂 id 必须等于 `package.json` 的 `name`」回归断言；离线自检 35 项全过、30 个 client bundle 扫描 0 不匹配。详见 [docs/RELEASE_NOTES_v1.1.2.md](docs/RELEASE_NOTES_v1.1.2.md)。 |
-| **1.1.1** | **修复每次切回面板/重启都要重新扫码的回归**：guest 分区与会话 key 固定为常量，账号状态仅作展示、不参与 guest 生命周期；瞬时 `unknown` 被忽略；guest 不再等待异步账号探测；自检改为验证固定分区与状态抖动不重建（35 项）。明确记录「纯插件无法免扫码复用 DSH token」的源码结论。 |
-| 1.1.0 | 支持 DSH `0.2.2-rc.1`：新增 DSH 账号状态条；修正生成式 Remote 信封解析；收紧会话 URL 与弹窗 URL 校验；失败时移除失效 guest。**此版把分区绑到账号状态，导致登录态抖动（已由 1.1.1 修复）**。 |
-| 1.0.0 | 首个本地版本：侧栏入口、全宽内嵌聊天、会话记忆、崩溃隔离。 |
+| **1.4.0** | 全自动投递通道（定界符提炼 + 官方 `conversation.send` 自动提交 + 决策卡） |
+| **1.3.0** | 手动绑定会话 + 状态栏齿轮跳设置页 + 会话标题 |
+| **1.2.1** | 半自动带回（结构化解析官方导出 JSON） |
+| **1.2.0** | 条件触发式自动闭环（三道安全阀） |
+| **1.1.7** | 右边栏卡片（dsh-better-sidebar） |
+| **1.1.1** | 修复切面板/重启反复扫码 |
+| **1.0.0** | 首个本地版本 |
 
 ## 开发
 
@@ -243,24 +103,15 @@ cd dsh-plugin-deepseek-chat
 node test/check-client.mjs
 ```
 
-`test/check-client.mjs` 是离线自检：在 `node:vm` 里加载 `lib/client.js`，用假的 React/DOM/租约桥验证四处槽位注册（左侧栏 / 全屏主面板 / 顶栏标签页 / 设置页）、**右边栏卡片双路径**（better-sidebar 服务正常运行时走 `registerTab`、否则走 DSH 原生 `sidebarRightTabs` 直注；两服务全缺席零卡片、两路径互斥、`internal/service` 服务晚到事件自动切换路径、无界可取消兜底 timer、title thunk 改名、开关注销/重注册、effect cleanup 注销并移除监听/取消 timer）、配置层（四项默认值、类型校验、持久化、订阅通知、动态重注入）、顶栏浮层的铺满样式、工厂 id 与包名一致、Web 表层 inert、两入口共用固定分区、纯网页聊天无账号条、URL 白名单、会话记忆、租约释放、弹窗白名单和崩溃隔离；并用 mock fetch 验证基础信息常量与 `package.json` 一致、语义版本比较、更新载荷解析、npm/GitHub 兜底、检查更新各状态分支与设置页点击联动，并用 fake pluginManager.updateBundle 验证一键更新的真调用、成功 / 需重启 / 失败各状态与兜底链接。
+`test/check-client.mjs` 是离线自检：在 `node:vm` 里用假 React/DOM/租约桥验证四处槽位注册、右边栏卡片双路径、配置层、自动闭环、全自动通道、更新链路等，全段 `RESULT: PASS`。
 
-目录：
-
-```
-lib/index.js           宿主半侧（空实现，只为让 client bundle 有 Loader 入口）
-lib/client.js          浏览器半侧：入口、网页聊天面板、顶栏铺满浮层、右边栏卡片（双路径：better-sidebar / DSH 原生直注）、设置页与配置层、关于信息/检查更新/一键更新、webview 生命周期、崩溃隔离
-cordis.patch.yml       bundle 补丁：插入本插件的 Loader 行
-locale/zh.json         插件页显示名称/描述（中文）
-locale/en.json         插件页显示名称/描述（英文）
-icon.svg               插件页图标
-docs/login-persistence.md  可选：DSH 内存分区改持久分区的字节补丁（含一键脚本说明）
-scripts/find-dsh.ps1       一键脚本共用的路径探测（自动定位 app.asar / DSH.exe / 自带 node）
-scripts/一键补丁.bat        一键打持久分区补丁（新电脑免改，随插件分发）
-scripts/回滚.bat            一键回滚到最新备份（留现场 / 失败自动退回）
-scripts/patch-dsh-persistent-partition.cjs  底层字节补丁（--dry-run / 全量 integrity 校验 / 幂等）
-test/check-client.mjs  离线自检
-```
+| 文件 | 用途 |
+|---|---|
+| `lib/client.js` | 浏览器半侧：面板、顶栏浮层、右边栏卡片、设置页、自动闭环/全自动通道、崩溃隔离 |
+| `lib/index.js` | 宿主半侧（空实现，提供 Loader 入口） |
+| `locale/{zh,en}.json` | 插件页显示名称/描述 |
+| `docs/login-persistence.md` | 持久分区补丁说明 |
+| `test/check-client.mjs` | 离线自检 |
 
 ## 卸载
 
@@ -270,13 +121,10 @@ dsh plugin --profile desktop remove @tianyulinfeng1/dsh-plugin-deepseek-chat
 
 ## 作者
 
-- **作者**：伍悦匿匿
-- **联系方式**：437830488@qq.com
-- **GitHub**：https://github.com/sweet560
-- **博客园**：https://www.cnblogs.com/wuyuenini/
-- **CSDN**：https://blog.csdn.net/weixin_42076389
-- **Gitee**：https://gitee.com/wtt520wyl
-- **Gitee 镜像仓库**：https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat
+- **作者**：伍悦匿匿 ｜ 437830488@qq.com
+- GitHub https://github.com/sweet560 ｜ Gitee https://gitee.com/wtt520wyl
+- 镜像仓库 https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat
+- 博客园 https://www.cnblogs.com/wuyuenini/ ｜ CSDN https://blog.csdn.net/weixin_42076389
 
 ## 许可证
 
