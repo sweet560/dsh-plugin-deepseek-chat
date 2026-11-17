@@ -2,9 +2,15 @@
 
 [English](README.en.md) | 中文
 
-> **当前版本：v1.2.6** ｜适配 DSH **0.2.2-rc.2**
+> **当前版本：v1.3.0** ｜适配 DSH **0.2.2-rc.3**
 
-在 **DeepSeek Harness（DSH）桌面版**加入 **DeepSeek 聊天**：左侧栏图标入口、会话顶栏标签页（默认名「DeepSeek 聊天」，可在设置页开关 / 自定义），以及通过 **dsh-better-sidebar**（若已安装）注册的**右边栏卡片**（默认名「DeepSeek 聊天」，独立开关 / 自定义），点开后 `chat.deepseek.com` 铺满会话区，记住上次所在的会话；提供**设置页面**（含插件基础信息与「检查更新」按钮），面板为**纯网页聊天**，不显示账号状态。
+本插件不只是把 `chat.deepseek.com` 嵌进 DSH——它是一套把 **DeepSeek 桌面会话与网页聊天双向桥接**的自动化工具：
+
+- **三个入口**：左侧栏图标、会话顶栏标签页、右边栏卡片（自动适配 dsh-better-sidebar 或 DSH 原生右侧栏，默认名「DeepSeek 聊天」，可开关 / 改名），打开同一份铺满会话区的网页聊天，记住上次会话。
+- **条件触发式自动闭环（可选开启）**：桌面一轮执行完成 → 自动把回答回传网页并发送 → 抓取网页回复 → **只写入桌面草稿**（绝不自动执行），是否继续始终由你决定；支持全自动 / 半自动带回两种模式，带最大轮数、错误关键词熔断、同轮去重三道安全阀。
+- **跨会话隔离**：闭环只服务手动绑定或首轮锁定的配对会话，切到别的会话不中断订阅、不串台；网页回复定向写回配对会话自己的草稿。
+- **状态栏工具**：一键「绑定当前会话」（无需先跑一轮）、齿轮直达本插件设置页并定位「DeepSeek 聊天」、把「已绑定到会话」显示为会话标题。
+- 另有**设置页面**（开关 / 改名 / 闭环配置 / 关于 / 检查更新 / 一键更新）、稳定的登录会话与崩溃隔离；面板为**纯网页聊天**，不显示账号状态。
 
 > 仓库：[GitHub](https://github.com/sweet560/dsh-plugin-deepseek-chat) ｜ [Gitee 镜像](https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat)
 
@@ -72,7 +78,9 @@
 
 > **v1.2.3（本版）**：发送确认——send 报 ok 不代表网页真的提交了消息。v1.2.3 在 `fillAndSend` 记录发送前用户消息节点数，延迟 `SEND_CONFIRM_DELAY=3500ms` 后回读 `confirm()`：出现新用户消息节点（`via=node`）或输入框已清空（`via=cleared`）即确认成功；两者皆无则显式进入 `error(unconfirmed)` 上报，状态条显示「再试一次」按钮（`retryPush()` 重发上一条、不增加轮次不重复去重）。新增第 14 配置字段 `userMessageSelectors`（设置页可改），确认结果写入 loop-trace 的 `lastSendConfirmed / lastSendConfirmVia / lastSendUserMsgDelta`。零回归：不改主流程、不触发 submit、手写桥桩跳过确认。离线自检新增 L 段 10 条断言（节点确认 / 输入框清空降级 / 失败上报 / 再试一次 / 延迟回读），A–K 全段 `RESULT: PASS`。详见 CHANGELOG 1.2.3 节。
 
-> **v1.2.6（本版）**：切会话后闭环照常走（B 方案）——闭环继续跟随首次 turn/end 锁定的配对会话运行，切到别的会话不中断订阅、不串入别会话内容。取证发现官方存在脱离当前 composer、对指定 `SessionBinding` 写草稿的 API（`conversation.input.requestDraftInitialization`），DSH 自身在导航切换时即用。两处改动：① 事件订阅从 composer dock 的 effect 上移到 runtime、按配对会话 id 定向（切走不换订不停订）；② 草稿注入改用该官方 API 写进配对会话自己的草稿（API 不可用才回退旧 `setDraft`），杜绝反向串台。状态条改为「闭环仍在配对会话运行 — 回复已注入该会话草稿；切回查看」。前提：切会话是导航、未关闭会话 A，否则需点「换绑」。N 段 9 条断言覆盖会话定向 API / binding 失效 / 防反向串台 / 订阅上移。详见 CHANGELOG 1.2.6 节。
+> **v1.3.0（本版）**：状态栏新增「手动绑定」与「齿轮跳设置页」——① **手动绑定**：未配对时状态栏显示「绑定当前会话」按钮，点一下即把当前会话锁定为自动闭环目标，无需先跑一轮 turn/end 才配对；已配对时仍显示「换绑」。② **齿轮跳设置页**：状态栏最右侧新增描边齿轮按钮，点击直接打开本插件设置页并自动定位到「DeepSeek 聊天」section（复用官方 settings.open 命令 + 面板内导航点击，规避桌面端合成键盘事件被 native 键盘桥截断的问题）。③ **会话标题**：状态栏「已绑定到会话」由显示短 id 改为显示会话标题（取官方 `displayTitle`，取不到才回退短 id）。离线自检新增 M10 + O/P/Q 段断言（手动绑定 / 齿轮 / 会话标题 / 设置页定位），全段 `RESULT: PASS`。详见 CHANGELOG 1.3.0 节。
+
+> **v1.2.6（上一版）**：切会话后闭环照常走（B 方案）——闭环继续跟随首次 turn/end 锁定的配对会话运行，切到别的会话不中断订阅、不串入别会话内容。取证发现官方存在脱离当前 composer、对指定 `SessionBinding` 写草稿的 API（`conversation.input.requestDraftInitialization`），DSH 自身在导航切换时即用。两处改动：① 事件订阅从 composer dock 的 effect 上移到 runtime、按配对会话 id 定向（切走不换订不停订）；② 草稿注入改用该官方 API 写进配对会话自己的草稿（API 不可用才回退旧 `setDraft`），杜绝反向串台。状态条改为「闭环仍在配对会话运行 — 回复已注入该会话草稿；切回查看」。前提：切会话是导航、未关闭会话 A，否则需点「换绑」。N 段 9 条断言覆盖会话定向 API / binding 失效 / 防反向串台 / 订阅上移。详见 CHANGELOG 1.2.6 节。
 
 > **v1.2.5（上一版）**：修复跨会话串台——实机「切到别的会话后，该会话的回答被自动搬进网页端」+「切走配对会话后这一轮不触发」是同一 bug 两面（闭环组件挂在全局 `conversation.composer.dock`，订阅当前 composer 会话的 `turn/end` 且无会话过滤，`injectDraft` 也不校验 `dock.sessionId`）。v1.2.5 让闭环同一时刻只服务**首次 turn/end 锁定的配对会话**：非配对会话的 turn/end 入口即丢弃、`injectDraft` 会话不符则拒绝（防双向串台）；切走配对会话 → 显式 `paused(switched-away)`，状态条显示「已绑定会话 X / 已暂停 / 换绑」，让「没搬运」变成可见预期状态，切回自动恢复（中间态归 idle，需用户继续）。M 段 9 条断言覆盖配对锁定 / 会话过滤 / 注入校验 / 切走暂停 / 换绑。闭环服务单会话是设计预期，非故障。详见 CHANGELOG 1.2.5 节。
 
@@ -84,7 +92,7 @@
 
 | 项 | 要求 |
 |---|---|
-| DSH | 桌面版 `0.2.2-rc.2` 或更新 |
+| DSH | 桌面版 `0.2.2-rc.3` 或更新 |
 | 平台 | Windows / macOS / Linux 桌面壳 |
 | git | 仅「GitHub 安装」方式需要（pnpm 通过 git 拉取仓库） |
 
@@ -206,7 +214,8 @@ DSH 目前给内嵌浏览器分配的是**内存分区**（`dsh-sidebar-browser-
 
 | 版本 | 内容 |
 |---|---|
-| **1.2.6** | **切会话后闭环照常走（B 方案）**：订阅上移到 runtime、按配对会话 id 定向（切走不换订不停订）；草稿注入改用官方 `conversation.input.requestDraftInitialization(binding,{prompt,whenDraftExists:'replace'})` 写进配对会话自己的草稿（API 不可用才回退旧 `setDraft`），杜绝反向串台；状态条「闭环仍在配对会话运行 — 回复已注入该会话草稿；切回查看」。前提：切会话=导航未关闭会话 A，否则需「换绑」。N 段 9 条断言。详见 CHANGELOG 1.2.6 节。 |
+| **1.3.0** | **手动绑定 + 状态栏齿轮跳设置页 + 会话标题**：未配对时状态栏「绑定当前会话」按钮一键锁定配对会话（无需先跑一轮）；最右侧齿轮按钮直接打开插件设置页并定位「DeepSeek 聊天」section（复用官方 settings.open + 面板内点击，规避桌面端合成键盘被 native 桥截断）；「已绑定到会话」显示官方 `displayTitle` 会话标题（取不到回退短 id）。M10+O/P/Q 段断言。详见 CHANGELOG 1.3.0 节。 |
+| | **1.2.6** | **切会话后闭环照常走（B 方案）**：订阅上移到 runtime、按配对会话 id 定向（切走不换订不停订）；草稿注入改用官方 `conversation.input.requestDraftInitialization(binding,{prompt,whenDraftExists:'replace'})` 写进配对会话自己的草稿（API 不可用才回退旧 `setDraft`），杜绝反向串台；状态条「闭环仍在配对会话运行 — 回复已注入该会话草稿；切回查看」。前提：切会话=导航未关闭会话 A，否则需「换绑」。N 段 9 条断言。详见 CHANGELOG 1.2.6 节。 |
 | | **1.2.5** | **跨会话串台修复**：闭环只服务首次 turn/end 锁定的配对会话——非配对会话 turn/end 入口即丢弃、`injectDraft` 校验 `dock.sessionId` 不符则拒绝（防双向串台）；切走配对会话 → `paused(switched-away)` + 状态条「已绑定会话 X / 已暂停 / 换绑」，切回自动恢复（中间态归 idle）。M 段 9 条断言覆盖配对锁定 / 会话过滤 / 注入校验 / 切走暂停 / 换绑。闭环服务单会话是设计预期，非故障。详见 CHANGELOG 1.2.5 节。 |
 | | **1.2.4** | **修复 v1.2.3 实机回归**：发送确认假阴性（`via=none`，DeepSeek 无 user 消息节点 + 输入框残留草稿）曾 `noteError` 把 waiting 翻成 error、掐断仅在 waiting 存活的回复轮询，导致「网页回复已生成完却抓不回桌面」。v1.2.4 把确认降级为纯观测（只写 loop-trace，不改 state），失败上报交给 180s 真实超时；「再试一次」改为只在 send 真失败时出现。L 段新增回归防线断言。详见 CHANGELOG 1.2.4 节。 |
 | **1.2.3** | **发送确认（从「send 报 ok」升级为「确认用户消息真的出现在网页消息流」）**：`fillAndSend` 记录发送前用户消息节点数，延迟 `SEND_CONFIRM_DELAY=3500ms` 后回读 `confirm()`：出现新用户消息节点（`via=node`）或输入框已清空（`via=cleared`）即确认成功；两者皆无则显式进入 `error(unconfirmed)` 上报，状态条显示「再试一次」按钮（`retryPush()` 重发上一条、不增加轮次不重复去重）。新增第 14 配置字段 `userMessageSelectors`（设置页可改），确认结果写入 loop-trace 的 `lastSendConfirmed / lastSendConfirmVia / lastSendUserMsgDelta`。零回归：不改主流程、不触发 submit、手写桥桩跳过确认。离线自检新增 L 段 10 条断言，A–K 全段 `RESULT: PASS`。详见 CHANGELOG 1.2.3 节。 |

@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented here.
 
+## 1.3.0 — 2026-11-16
+
+### 状态栏增强：手动绑定 + 齿轮直达设置页 + 会话标题
+
+- **需求 / 用户反馈**：用户希望不必先跑一轮 turn/end 才锁定配对会话（m00189）；状态栏右侧加齿轮点击跳设置页（m00189）；齿轮打开后要直接定位到「DeepSeek 聊天」插件设置页而非默认「账号与余额」（m00914）；状态栏「已绑定到会话」由短 id 改为会话标题（m00796）。
+- **功能 ① 手动绑定**：controller 新增 `bindSession(sid)`（紧接 `unpair()`），设置 `pairedSessionId` 并同步 `currentSessionId`、清 `switchPaused`、`emit("manual-bind")`；空 sid 拒绝。状态栏在未配对且有当前会话时显示「绑定当前会话」按钮（`data-dsh-plugin-deepseek-chat="sync-bind"`），点击即 `bindSession(currentSessionId)`；已配对时仍显示原「换绑」（互斥）。订阅重定向复用现有 pairListener（监听 controller.subscribe，paired ""→新值时 `ensureEventSubscription` 改订），无需额外代码。
+- **功能 ② 齿轮跳设置页**：状态栏最右侧新增描边齿轮按钮（`sync-settings`，inline SVG Feather settings 风格，与 DSH 账户菜单「设置 Ctrl+,」同款），点击 `openSettingsViaShortcut()`。
+  - **根因 / 决策**：最初用合成 `keydown` 触发官方 `settings.open`，离线测试只验证「派发了事件」属假阳性；用户实机反馈点击无反应（m00629）。asar 源码双重确认：桌面端 `ShortcutsService` 启用 native 键盘桥，`dom.ts` 的 keydown handler 在 `if (native) return` 处截断合成事件，从不 `dispatch`；而账户菜单走 `native.ts` 的 `registry.invoke(commandId, context)`。修复为首选 `ctx.get("shortcuts").registry.invoke("settings.open", {region:"page",modal:null,target:activeElement,source:"menu"})`（编译产物中 `registry` 是运行时普通属性，`ShortcutRegistry.invoke` 传 modal:null 通过校验 → `shellInstance.actions.open()`）；拿不到 registry 才回退合成 primary+Comma keydown（Web 端）。
+  - **直达 section**：`settings.open` 只接 `{modal}`、无 section 参数，`openSection(id)` / `openSettings(sectionId)` 均未经 `ctx.provide` 暴露给外部插件。故新增 `focusDeepSeekChatSection(doc, timers)`：面板打开后在 `[data-shortcut-modal="settings"]` 内找 textContent 为「DeepSeek 聊天 / DeepSeek Chat」的 nav 按钮调 `.click()`（React 事件委托，不受 native 键盘桥截断）；面板异步渲染故短轮询 `[30,90,180,320]ms`；中英 label 都匹配；全程 try/catch，失败只停在默认 section 不比修复前差。两条打开路径（registry.invoke / 回退 keydown）成功后均调用。
+- **功能 ③ 会话标题**：新增 `sessionDisplayTitle(rt, sid)`，取 `ctx.get("sessions").list.getSnapshot().byId[id]` 的 `displayTitle || title`（借鉴 `_research/dsh-notify-me` 的 `sessionTitleOf`），取不到回退 `id.slice(0,18)`；SyncStatusBar useEffect 增 `sessions.list.subscribe` 让标题延迟到达时刷新；渲染处用标题替换短 id。
+- **Verification**：`node --check` 通过；`node test/check-client.mjs` → `RESULT: PASS`。新增断言：M10 手动绑定 5 条、O 段状态栏按钮/设置跳转 8 条、P 段会话标题 2 条、Q 段设置页定位 3 条（中文/英文 label + 延迟渲染补点），连同 A–N 全段全绿。`git diff --check` 干净；行尾 `i/lf w/lf attr/text eol=lf`。
+- **实机回归修复（v1.3.0 定稿前）**：用户实机反馈齿轮打开设置页后仍未定位 section，且整个会话界面被切走、需切到别的会话再切回才恢复（m01062）。根因：`focusDeepSeekChatSection` 的 `findAndClick` 里写的是 `const scope = panel || doc`——设置面板异步渲染尚未出现时 `panel` 为 null，回退到整个 `document` 找同名按钮，结果误点了**主界面左侧栏的「DeepSeek 聊天」按钮**（该按钮与设置页 section nav 同名），把会话界面切走。修复：面板不存在时直接 `return false` 交给短轮询重试，**绝不回退到整个 document**；轮询窗口从 `[30,90,180,320]ms` 放宽到 `[50,120,250,450,700,1000]ms`（约 1 秒，适配不同 DSH 版本渲染快慢）；点击成功加 console.info 诊断日志。Q 段新增回归防线断言「面板不存在时绝不误点主界面同名按钮」，确保此 bug 不再复发。
+- **如实限制 / 继承缺口**：1.2.6 已知的六项缺口（setDraft 异常记为 no-dock / via 恒 cleared / lastSendMethod 恒空 / 会话关闭无兜底 / trace 无 sessionId / 半自动带回未动）本次未触及，继续保留；齿轮直达 section 依赖 DSH 设置页 DOM 结构与中文/英文 nav label，DSH 升级改动这些时可能失效（已 try/catch 兜底，最差停在默认设置页）。
+
+### 输入框残留修复（v1.3.0 定稿前，基于实机诊断证据）
+
+- **症状 / 用户反馈**：自动链路首次「DSH 内容 → 网页 chat」时，消息已发出但网页输入框仍残留文本（m01103）。
+- **走过的弯路（如实留痕）**：最初凭未验证假设改写发送核心的 1s 兜底，并新增 `clearResidualDraft()` 用**原生 setter 直写 DOM** 清残留——结果把「仅首轮残留」变成「每轮都残留」（m01189）。根因：DeepSeek 输入框是 React 受控组件，DOM 值由组件 state 决定；原生 setter 绕过 state，state 里仍留旧文本，下次重渲染又写回 DOM。该错误修复已**完全回退**，确立铁律：不再凭假设盲改发送核心，先用实机诊断拿证据。
+- **诊断（纯观测、发送行为零改动）**：BRIDGE_IMPL 埋点记录每轮「填充 / 点击前后 / Enter 兜底前后 / 1s 兜底 / 确认」各时刻的输入框状态，写进 loop-trace 的 `send-diag` 事件（`test/read-send-diag.cjs` 只读解析）。实机数据坐实三点：① 全程无 `before/after-click`——发送按钮从未被识别，全靠 Enter/Ctrl+Enter 键盘兜底；② 键盘发送后 `boxLen` 从 936→937（普通 Enter 被当换行，真正提交靠 Ctrl+Enter）；③ 连续两轮记录里首轮 `cleared=false`（残留）、次轮 `cleared=true`，精确复现「仅首轮残留」。
+- **修复（不碰发送核心）**：新增 `clearResidualByUserIntent(box)`——用**真实浏览器编辑命令**（textarea 的 `select()` / contenteditable 的 `Range.selectNodeContents` 全选，再 `document.execCommand('delete')`）清空残留；这条路径会派发 input 事件，让网页受控 state 真正同步为空，重渲染不再写回（与失败的「原生 setter 直写」本质不同）。仅在 `confirm()` 时序（3.5s 后，发送早已完成、不与提交竞态）且 `sent=true` 且检测到残留时调用。**关键防自证**：清理前的 `clearedOriginal` 专供 `confirmed`/`via` 判断，清理结果只记诊断、绝不参与确认，避免「用自己的清理结果证明已提交」的循环论证。
+- **Verification**：`node --check` 通过；`node test/check-client.mjs` → `RESULT: PASS`。L 段新增 3 条断言：L10 用带 `select()`+`execCommand('delete')` 的桩验证残留被清、`residualCleaned=true` 且 `confirmed/via` 不被污染；L11 验证点击发送已清空输入框时不触发多余清理、`via=cleared` 零回归；连同 A–Q 全段全绿。仍**待用户重启 DSH 实机验证**首轮残留是否消失。
+
+### 文档与元信息重写：插件定位 + 支持版本同步
+
+- **需求**：发布前准备——文件规整、重写 README 功能简介（插件已不只是「把 DeepSeek 聊天嵌进 DSH」）、所有「支持的 DSH 版本」同步更新（m01430）。
+- **插件定位重写**：README.md / README.en.md 功能简介、package.json `description`、设置页 `COPY.infoSummary`（中英）、locale/en.json 与 locale/zh.json 的 `meta.description` 共 6 处，统一改为「DeepSeek 桌面会话 ↔ 网页聊天双向桥接工具」的新定位，覆盖：三入口、可选条件触发式自动闭环（全自动 / 半自动带回 + 三道安全阀）、跨会话隔离、状态栏工具（手动绑定 / 齿轮直达设置页 / 会话标题）、设置页与稳定登录。
+- **支持版本同步**：实机核对 DSH 核心与全部官方 bundle 当前均为 `0.2.2-rc.3`，故把「当前声明」从 `0.2.2-rc.2` 更新到 `0.2.2-rc.3`：`package.json` 的 `engines.dsh`、README 中英版本行与环境要求表。历史记录中的 rc.2（v1.1.8 描述、旧 CHANGELOG 条目、docs/RELEASE_NOTES_v1.1.7/1.1.8）按约定保留不动。
+- **文件规整**：删除根目录未跟踪的旧归档 `dsh-plugin-deepseek-chat-1.1.5.tgz`；`scripts/patch-dsh-persistent-partition.mjs` 是「已废弃、运行即报错」的向后兼容存根，被 README/docs 作为反面教材引用，保留删除反而破坏兼容，故不删。
+- **Verification**：`node --check` 通过；`node test/check-client.mjs` → `RESULT: PASS`（测试对 description 零断言，改动安全）；`npm pack --dry-run` 复核产物清单；`git diff --check` 干净；locale 两文件行尾规范为 LF。
+
 ## 1.2.6 — 2026-11-16
 
 ### 切会话后闭环照常走（B 方案）：订阅与草稿注入都按配对会话定向

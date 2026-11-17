@@ -1,4 +1,4 @@
-// dsh-plugin-deepseek-chat 客户端包离线自检（v1.2.6）。
+// dsh-plugin-deepseek-chat 客户端包离线自检（v1.3.0）。
 //
 // 这个包是浏览器 ModuleLoader 脚本，因此自检：
 //   1. 在 vm 里执行它，捕获 __ModuleLoader__.load 的注册；
@@ -2120,6 +2120,98 @@ storage.clear();
   if (ctlL.getState().state !== "waiting" || ctlL.getState().pausedReason === "unconfirmed") {
     fail(`假阴性确认不应掐断回复轮询：state=${ctlL.getState().state}, pausedReason=${ctlL.getState().pausedReason}`);
   } else ok("v1.2.4 回归防线：确认 via=none 假阴性时 state 保持 waiting，回复轮询不被掐断");
+
+  // L10（v1.3.0 首轮残留修复）：键盘兜底发送后 DOM 残留（React state 未同步）。
+  // confirm 用真实浏览器编辑命令（select + execCommand('delete')）清残留，且清理结果
+  // 绝不能污染 confirmed/via 判断（只能用清理前的 clearedOriginal）。
+  {
+    let boxValue = "";
+    let execDeleteCalls = 0;
+    let selected = false;
+    const box = {
+      isContentEditable: false,
+      getAttribute: () => null,
+      focus() {},
+      select() { selected = true; },
+      get value() { return boxValue; },
+      dispatchEvent() { /* 键盘兜底不清空输入框，模拟首轮残留 */ }
+    };
+    const textareaProto = {};
+    Object.defineProperty(textareaProto, "value", { configurable: true, get() { return boxValue; }, set(v) { boxValue = v; } });
+    const htmlProto = {};
+    Object.defineProperty(htmlProto, "innerHTML", { configurable: true, get() { return ""; }, set() {} });
+    const doc = {
+      body: {},
+      execCommand(cmd) {
+        if (cmd === "delete" && selected) { boxValue = ""; execDeleteCalls += 1; return true; }
+        return false;
+      },
+      querySelector(sel) {
+        if (cfgL.textareaSelectors.includes(sel)) return box;
+        return null;  // 发送按钮不可用 → 走键盘兜底
+      },
+      querySelectorAll() { return []; }  // 无用户消息节点 → delta=0
+    };
+    box.ownerDocument = doc;
+    const win = { HTMLTextAreaElement: { prototype: textareaProto }, HTMLElement: { prototype: htmlProto } };
+    class MO { constructor(cb) { this.cb = cb; } observe() {} disconnect() {} }
+    class Ev { constructor(type) { this.type = type; } }
+    class KeyEv { constructor(type, o) { this.type = type; Object.assign(this, o || {}); } }
+    const factory = new Function("window", "document", "MutationObserver", "Event", "KeyboardEvent",
+      "return (" + api.BRIDGE_IMPL + ")")(win, doc, MO, Ev, KeyEv);
+    const bridgeL10 = factory(cfgL);
+    bridgeL10.fillAndSend("桌面端回答");
+    if (boxValue === "") fail("L10 前置失败：填入后输入框应留有文本（键盘兜底不清空）");
+    const cfL10 = bridgeL10.confirm();
+    if (boxValue !== "" || execDeleteCalls !== 1 || cfL10.residualCleaned !== true) {
+      fail(`首轮残留清理失败：boxValue=${JSON.stringify(boxValue)}, execDelete=${execDeleteCalls}, residualCleaned=${cfL10.residualCleaned}`);
+    } else ok("v1.3.0 首轮残留修复：confirm 用 select+execCommand('delete') 清空残留，residualCleaned=true");
+    if (cfL10.confirmed !== false || cfL10.via !== "none") {
+      fail(`残留清理污染了确认判断：confirmed=${cfL10.confirmed}, via=${cfL10.via}（应仍为 false/none，不得自证）`);
+    } else ok("v1.3.0 零回归：清理结果不参与 confirmed/via 判断，仅凭清理前状态（不自证已提交）");
+  }
+
+  // L11：常规点击发送（sendBtn.click 已清空输入框）→ 无残留、不做多余清理（零回归）。
+  {
+    let boxValue = "";
+    let execDeleteCalls = 0;
+    const box = {
+      isContentEditable: false,
+      getAttribute: () => null,
+      focus() {},
+      select() {},
+      get value() { return boxValue; },
+      dispatchEvent() {}
+    };
+    const textareaProto = {};
+    Object.defineProperty(textareaProto, "value", { configurable: true, get() { return boxValue; }, set(v) { boxValue = v; } });
+    const htmlProto = {};
+    Object.defineProperty(htmlProto, "innerHTML", { configurable: true, get() { return ""; }, set() {} });
+    const sendBtn = { disabled: false, click() { boxValue = ""; } };
+    const doc = {
+      body: {},
+      execCommand(cmd) { if (cmd === "delete") execDeleteCalls += 1; return false; },
+      querySelector(sel) {
+        if (cfgL.textareaSelectors.includes(sel)) return box;
+        if (cfgL.sendButtonSelectors.includes(sel)) return sendBtn;
+        return null;
+      },
+      querySelectorAll() { return []; }
+    };
+    box.ownerDocument = doc;
+    const win = { HTMLTextAreaElement: { prototype: textareaProto }, HTMLElement: { prototype: htmlProto } };
+    class MO { constructor(cb) { this.cb = cb; } observe() {} disconnect() {} }
+    class Ev { constructor(type) { this.type = type; } }
+    class KeyEv { constructor(type, o) { this.type = type; Object.assign(this, o || {}); } }
+    const factory = new Function("window", "document", "MutationObserver", "Event", "KeyboardEvent",
+      "return (" + api.BRIDGE_IMPL + ")")(win, doc, MO, Ev, KeyEv);
+    const bridgeL11 = factory(cfgL);
+    bridgeL11.fillAndSend("桌面端回答");
+    const cfL11 = bridgeL11.confirm();
+    if (execDeleteCalls !== 0 || cfL11.residualCleaned !== false || !cfL11.confirmed || cfL11.via !== "cleared") {
+      fail(`无残留场景被误清理：execDelete=${execDeleteCalls}, residualCleaned=${cfL11.residualCleaned}, confirmed=${cfL11.confirmed}, via=${cfL11.via}`);
+    } else ok("v1.3.0 零回归：输入框已被点击清空时不触发残留清理，via=cleared 正常确认");
+  }
 }
 
 // ── M 段（v1.2.5 跨会话串台修复）：配对会话锁定 + 会话过滤 + 注入校验 + 切走暂停 + 换绑 ──
@@ -2203,6 +2295,26 @@ storage.clear();
   ctlM2.reset();
   if (ctlM2.getState().pairedSessionId !== "") fail("reset 未清空配对会话");
   else ok("v1.2.5：reset 清空配对会话，可重新绑定");
+
+  // M10（手动绑定）：无需先跑一轮 turn/end，直接锁定配对会话。
+  const ctlBind = api.createSyncController({ getConfig: ctlCfg });
+  if (ctlBind.getState().pairedSessionId !== "") fail("新 controller 初始不该有配对会话");
+  else ok("手动绑定：新 controller 初始未绑定");
+  const bound = ctlBind.bindSession("sManual");
+  const stBind = ctlBind.getState();
+  if (bound !== true || stBind.pairedSessionId !== "sManual" || stBind.currentSessionId !== "sManual") {
+    fail(`手动绑定未锁定会话：bound=${bound}, paired=${stBind.pairedSessionId}, current=${stBind.currentSessionId}`);
+  } else ok("手动绑定：bindSession 直接锁定配对会话（无需先跑 turn/end）");
+  // 绑定后，其它会话的 turn/end 被过滤，目标会话正常进入闭环。
+  const mdOther = ctlBind.handleTurnEnd({ sessionId: "sOther", turn: 1, reasonKind: "completed", answerText: "X" });
+  if (mdOther.action !== "skip" || mdOther.reason !== "unpaired-session") fail("手动绑定后未过滤其它会话");
+  else ok("手动绑定：绑定后非目标会话 turn/end 被过滤");
+  const mdTarget = ctlBind.handleTurnEnd({ sessionId: "sManual", turn: 1, reasonKind: "completed", answerText: "Y" });
+  if (mdTarget.action !== "push") fail("手动绑定后目标会话 turn/end 未进入闭环");
+  else ok("手动绑定：绑定后目标会话 turn/end 正常进入闭环");
+  // 空 sid 被拒绝，不产生无效绑定。
+  if (ctlBind.bindSession("") !== false || ctlBind.bindSession(null) !== false) fail("空会话 id 不该绑定成功");
+  else ok("手动绑定：空会话 id 被拒绝");
 }
 
 // ── N 段（v1.2.6 B 方案）：切会话后闭环照常走——跨会话草稿 API + 订阅上移 ──
@@ -2294,6 +2406,165 @@ storage.clear();
   api.ensureEventSubscription(rtSub, "sB");
   if (subscribedIds.filter((s) => s === "sA").length !== countA) fail("重复订阅了同一会话");
   else ok("v1.2.6：目标会话不变时不重复订阅（避免事件重复触发）");
+}
+
+// ── O 段（手动绑定 + 齿轮跳设置页）：状态栏按钮渲染 + 点击 + keydown 派发 ──
+{
+  // 建立真实运行单例并打开总开关，让状态栏渲染。
+  const oCtx = makeCtx();
+  const oRt = api.ensureSyncRuntime(oCtx);
+  if (typeof oRt.dockDispose === "function") { try { oRt.dockDispose(); } catch { /* 已释放 */ } }
+  oRt.dockDispose = null;
+  oRt.cancelled = false;
+  api.writeConfig({ autoSyncEnabled: true, maxAutoLoops: 3, errorKeywords: [...api.DEFAULT_ERROR_KEYWORDS] });
+  oRt.controller.reset();
+  // 未绑定：仅记录当前会话，让状态栏走「显示绑定按钮」分支。
+  oRt.controller.noteCurrentSession("sCurrent");
+  const stBefore = oRt.controller.getState();
+  if (stBefore.pairedSessionId !== "" || stBefore.currentSessionId !== "sCurrent") fail("O 段前置状态不对");
+  else ok("手动绑定前置：未配对、当前会话 sCurrent");
+
+  const bar = mount(react.createElement(api.SyncStatusBar, {}));
+  const bindBtn = findByAttr(bar, "data-dsh-plugin-deepseek-chat", "sync-bind");
+  const rebindBtn = findByAttr(bar, "data-dsh-plugin-deepseek-chat", "sync-rebind");
+  if (!bindBtn || rebindBtn) fail("未配对时状态栏应显示绑定按钮而非换绑按钮");
+  else ok("手动绑定：未配对时状态栏显示「绑定当前会话」按钮");
+
+  const gearBtn = findByAttr(bar, "data-dsh-plugin-deepseek-chat", "sync-settings");
+  if (!gearBtn) fail("状态栏缺少齿轮设置按钮");
+  else if (!gearBtn.children || !gearBtn.children.some((c) => c && c.tag === "svg")) fail("齿轮按钮未使用 inline SVG 图标");
+  else ok("齿轮按钮：状态栏渲染 sync-settings 按钮（inline SVG 齿轮）");
+
+  // 点击「绑定当前会话」→ bindSession 锁定当前会话。
+  if (bindBtn) {
+    bindBtn.dispatch("click", {});
+    const stAfter = oRt.controller.getState();
+    if (stAfter.pairedSessionId !== "sCurrent") fail("点击绑定按钮未锁定当前会话");
+    else ok("手动绑定：点击「绑定当前会话」按钮 → 直接锁定当前会话（无需跑一轮）");
+  }
+  // 已配对后重新渲染 → 显示换绑按钮而非绑定按钮。
+  const bar2 = mount(react.createElement(api.SyncStatusBar, {}));
+  const rebind2 = findByAttr(bar2, "data-dsh-plugin-deepseek-chat", "sync-rebind");
+  const bind2 = findByAttr(bar2, "data-dsh-plugin-deepseek-chat", "sync-bind");
+  if (!rebind2 || bind2) fail("已配对时状态栏应显示换绑按钮而非绑定按钮");
+  else ok("手动绑定：已配对时状态栏显示「换绑」按钮（绑定/换绑互斥）");
+
+  // 设置跳转首选路径：ctx.get("shortcuts").registry.invoke("settings.open")（桌面端唯一可靠路径）。
+  const invoked = [];
+  const ctxStub = { get(name) { return name === "shortcuts" ? {
+    registry: { invoke(id, context) { invoked.push({ id, context }); } }
+  } : undefined; } };
+  const firedInvoke = api.openSettingsViaShortcut(ctxStub, null, null, null);
+  if (firedInvoke !== true || invoked.length !== 1 || invoked[0].id !== "settings.open" ||
+      invoked[0].context.modal !== null || invoked[0].context.source !== "menu") {
+    fail(`设置跳转首选路径 registry.invoke 未正确调用：fired=${firedInvoke}, invoked=${JSON.stringify(invoked)}`);
+  } else ok("设置跳转：首选 ctx.shortcuts.registry.invoke('settings.open')（桌面端账户菜单同款路径）");
+
+  // 回退路径：拿不到 registry 时，合成 keydown（Web 端有效）。
+  const winEvents = [];
+  function KeyEvStub(type, init) { this.type = type; this.init = init; }
+  const winStub = { navigator: { platform: "Win32", userAgent: "" }, dispatchEvent(ev) { winEvents.push(ev); return true; } };
+  const noShortcutsCtx = { get() { return undefined; } };
+  const firedWin = api.openSettingsViaShortcut(noShortcutsCtx, null, winStub, KeyEvStub);
+  if (firedWin !== true || winEvents.length !== 1 || winEvents[0].type !== "keydown" ||
+      winEvents[0].init.code !== "Comma" || winEvents[0].init.ctrlKey !== true || winEvents[0].init.metaKey !== false) {
+    fail(`设置跳转回退 Windows keydown 派发错误：fired=${firedWin}, events=${JSON.stringify(winEvents.map((e) => e.init))}`);
+  } else ok("设置跳转回退：无 registry 时 Windows 派发单个 Ctrl+Comma keydown");
+
+  const macEvents = [];
+  const macStub = { navigator: { platform: "MacIntel", userAgent: "" }, dispatchEvent(ev) { macEvents.push(ev); return true; } };
+  api.openSettingsViaShortcut(noShortcutsCtx, null, macStub, KeyEvStub);
+  if (macEvents.length !== 1 || macEvents[0].init.metaKey !== true || macEvents[0].init.ctrlKey !== false) {
+    fail("设置跳转回退 Mac keydown 派发错误（应 Cmd+Comma）");
+  } else ok("设置跳转回退：Mac 派发 Cmd+Comma keydown");
+
+  api.writeConfig({ autoSyncEnabled: false });
+}
+
+// ── P 段（会话标题显示）：绑定会话优先显示官方 displayTitle，取不到回退短 id ──
+{
+  let listRows = { sBound: { displayTitle: "会话标题XYZ", title: "会话标题XYZ" } };
+  const pCtx = makeCtx();
+  pCtx.get = (name) => {
+    if (name === "sessions") return {
+      list: {
+        getSnapshot: () => ({ byId: listRows }),
+        subscribe: () => () => {}
+      }
+    };
+    return undefined;
+  };
+  // ensureSyncRuntime 是单例：再次调用仅刷新 ctx，不重复注册槽位。
+  const pRt = api.ensureSyncRuntime(pCtx);
+  api.writeConfig({ autoSyncEnabled: true, maxAutoLoops: 3, errorKeywords: [...api.DEFAULT_ERROR_KEYWORDS] });
+  pRt.controller.reset();
+  pRt.controller.bindSession("sBound");
+
+  const barTitle = mount(react.createElement(api.SyncStatusBar, {}));
+  const textsWithTitle = collectTexts(barTitle).join(" ");
+  if (!textsWithTitle.includes("会话标题XYZ")) fail("绑定会话未显示官方 displayTitle 标题：" + textsWithTitle);
+  else ok("会话标题：绑定会话优先显示官方 displayTitle（会话标题XYZ）");
+
+  // 列表未就绪 / 标题缺席 → 回退短 id（冷启动与测试桩零回归）。
+  listRows = {};
+  const barFallback = mount(react.createElement(api.SyncStatusBar, {}));
+  const textsFallback = collectTexts(barFallback).join(" ");
+  if (!textsFallback.includes("sBound") || textsFallback.includes("会话标题XYZ")) fail("标题缺席时未回退短 id：" + textsFallback);
+  else ok("会话标题：标题缺席时回退短 id（零回归）");
+
+  api.writeConfig({ autoSyncEnabled: false });
+}
+
+// ── Q 段（齿轮定位 DeepSeek 聊天 section）：面板打开后点击对应 nav 按钮 ──
+{
+  const clicked = [];
+  const dsBtn = { textContent: "DeepSeek 聊天", click: () => clicked.push("ds") };
+  const acctBtn = { textContent: "账号与余额", click: () => clicked.push("acct") };
+  const panel = { querySelectorAll: (sel) => (sel === "button" ? [acctBtn, dsBtn] : []) };
+  const docStub = {
+    querySelector: (sel) => (sel === '[data-shortcut-modal="settings"]' ? panel : null),
+    querySelectorAll: (sel) => panel.querySelectorAll(sel)
+  };
+  const fired = api.focusDeepSeekChatSection(docStub, () => 0);
+  if (!fired || clicked.length !== 1 || clicked[0] !== "ds") fail("齿轮定位：未点击 DeepSeek 聊天 nav 按钮：" + JSON.stringify(clicked));
+  else ok("齿轮定位：打开设置后点击 'DeepSeek 聊天' nav 按钮（非账号与余额）");
+
+  // 英文 label 也能命中。
+  const clickedEn = [];
+  const dsBtnEn = { textContent: "DeepSeek Chat", click: () => clickedEn.push("ds") };
+  const panelEn = { querySelectorAll: () => [dsBtnEn] };
+  const docStubEn = {
+    querySelector: () => panelEn,
+    querySelectorAll: (sel) => panelEn.querySelectorAll(sel)
+  };
+  api.focusDeepSeekChatSection(docStubEn, () => 0);
+  if (clickedEn.length !== 1) fail("齿轮定位：英文 label 'DeepSeek Chat' 未命中");
+  else ok("齿轮定位：英文 label 'DeepSeek Chat' 同样命中");
+
+  // 面板尚未渲染时：首轮不命中 → 短轮询计时器已排期（注入 timers 记录）。
+  const timers = [];
+  let attempts = 0;
+  const lateBtn = { textContent: "DeepSeek 聊天", click: () => clicked.push("late") };
+  const latePanel = { querySelectorAll: () => (++attempts >= 2 ? [lateBtn] : []) };
+  const docLate = {
+    querySelector: () => latePanel,
+    querySelectorAll: (sel) => latePanel.querySelectorAll(sel)
+  };
+  api.focusDeepSeekChatSection(docLate, (fn, delay) => { timers.push(delay); if (timers.length === 1) fn(); });
+  if (timers.length < 4 || clicked.indexOf("late") === -1) fail("齿轮定位：面板延迟渲染时短轮询未命中：" + JSON.stringify({ timers, clicked }));
+  else ok("齿轮定位：面板延迟渲染时短轮询补点成功");
+
+  // 【回归防线】面板不存在时（querySelector 返回 null），即使整个 document 里有
+  // 同名「DeepSeek 聊天」按钮（主界面左侧栏），也绝不能误点——那会切走会话界面。
+  const misclick = [];
+  const mainSidebarBtn = { textContent: "DeepSeek 聊天", click: () => misclick.push("sidebar") };
+  const docNoPanel = {
+    querySelector: () => null,
+    querySelectorAll: () => [mainSidebarBtn]
+  };
+  api.focusDeepSeekChatSection(docNoPanel, () => 0);
+  if (misclick.length !== 0) fail("齿轮定位：面板不存在时误点了主界面同名按钮（会切走会话界面）：" + JSON.stringify(misclick));
+  else ok("齿轮定位：面板不存在时绝不误点主界面同名按钮（修复会话界面被切走的回归）");
 }
 
 console.log(failures === 0 ? "RESULT: PASS" : `RESULT: FAIL (${failures})`);
