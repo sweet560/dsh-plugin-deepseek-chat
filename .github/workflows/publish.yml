@@ -4,12 +4,15 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-  release:
-    types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: '要建 Release 的 tag（留空则自动取 HEAD 上的 tag 或 tag push 事件）'
+        required: false
+        type: string
 
 permissions:
-  contents: read
+  contents: write # release job 需要创建 Release 与上传资产
   id-token: write # 关键：启用 OIDC
 
 # 按「仓库」串行：同一 commit 被 push main 与 push tag 触发两次时，两个运行落入
@@ -88,3 +91,82 @@ jobs:
           echo "::error::npm publish failed (code=$code), not a benign E409."
           cat "$RUNNER_TEMP/npm-publish.log"
           exit "$code"
+
+  # 建 Release 并上传 tgz：解决「发布完发行版是空的/最新的没上」的问题。
+  # 完全幂等：已有同 tag 的 Release/资产会复用/覆盖，重复触发不会重复建。
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          INPUT_TAG="${{ inputs.tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG=$(git tag --points-at HEAD | head -n 1)
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::notice::未找到可建 Release 的 tag，跳过 release job。"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "解析到 tag: $TAG"
+
+      - name: Pack tgz
+        if: steps.tag.outputs.tag != ''
+        id: pack
+        shell: bash
+        run: |
+          npm pack --pack-destination "$RUNNER_TEMP"
+          TGZ=$(ls "$RUNNER_TEMP"/*.tgz | head -n 1)
+          echo "tgz=$TGZ" >> "$GITHUB_OUTPUT"
+          echo "打包: $TGZ"
+
+      - name: Create or refresh GitHub Release
+        if: steps.tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          TGZ: ${{ steps.pack.outputs.tgz }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::GitHub Release $TAG 已存在，复用。"
+          else
+            gh release create "$TAG" \
+              --title "$TAG 全自动流程初步真机验证通过" \
+              --notes "全自动流程初步真机验证通过（持续完善中）。安装：下载本 Release 的 tgz 用 DSH 插件管理器安装，或在插件市场搜索 deepseek-chat。" \
+              "$TGZ"
+            echo "::notice::GitHub Release $TAG 已创建。"
+          fi
+          # 幂等上传资产：--clobber 覆盖同名，重复运行不报错
+          gh release upload "$TAG" "$TGZ" --clobber
+          echo "::notice::tgz 资产已上传到 GitHub Release $TAG。"
+
+      - name: Create or refresh Gitee Release
+        if: steps.tag.outputs.tag != ''
+        env:
+          GITEE_API_TOKEN: ${{ secrets.GITEE_API_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          TGZ: ${{ steps.pack.outputs.tgz }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: python .github/scripts/gitee-release.py
