@@ -2,6 +2,8 @@
 
 English | [中文](README.md)
 
+[![npm version](https://img.shields.io/npm/v/@tianyulinfeng1/dsh-plugin-deepseek-chat.svg)](https://www.npmjs.com/package/@tianyulinfeng1/dsh-plugin-deepseek-chat) [![npm downloads](https://img.shields.io/npm/dm/@tianyulinfeng1/dsh-plugin-deepseek-chat.svg)](https://www.npmjs.com/package/@tianyulinfeng1/dsh-plugin-deepseek-chat) [![publish](https://github.com/sweet560/dsh-plugin-deepseek-chat/actions/workflows/publish.yml/badge.svg)](https://github.com/sweet560/dsh-plugin-deepseek-chat/actions/workflows/publish.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![node](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org/) [![DSH 0.2.2-rc.5+](https://img.shields.io/badge/DSH-0.2.2--rc.5%2B-4d6bfe)](https://github.com/deepseek-ai/deepseek-harness) [![powered by DSH](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+
 > **Current version: v1.4.6** | Targets DSH **0.2.2-rc.5**
 >
 > ✅ **The full auto-pilot flow has passed initial real-machine verification and is being refined.** The three-way chain (web reviewer agent ⇄ desktop dev agent ⇄ you as decision maker) now runs unattended through the auto-pilot channel and has been verified on a real machine; it is still being polished — try it in a small scope first, and take over anytime with the status bar "■ Stop auto-pilot".

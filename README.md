@@ -2,6 +2,8 @@
 
 [English](README.en.md) | 中文
 
+[![npm version](https://img.shields.io/npm/v/@tianyulinfeng1/dsh-plugin-deepseek-chat.svg)](https://www.npmjs.com/package/@tianyulinfeng1/dsh-plugin-deepseek-chat) [![npm downloads](https://img.shields.io/npm/dm/@tianyulinfeng1/dsh-plugin-deepseek-chat.svg)](https://www.npmjs.com/package/@tianyulinfeng1/dsh-plugin-deepseek-chat) [![publish](https://github.com/sweet560/dsh-plugin-deepseek-chat/actions/workflows/publish.yml/badge.svg)](https://github.com/sweet560/dsh-plugin-deepseek-chat/actions/workflows/publish.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![node](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org/) [![DSH 0.2.2-rc.5+](https://img.shields.io/badge/DSH-0.2.2--rc.5%2B-4d6bfe)](https://github.com/deepseek-ai/deepseek-harness) [![powered by DSH](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+
 > **当前版本：v1.4.6** ｜适配 DSH **0.2.2-rc.5**
 >
 > ✅ **全自动流程初步真机验证通过，正在不断完善中。** 三条协作链（网页审查 agent ⇄ 桌面开发 agent ⇄ 你决策）已能经全自动通道无人值守跑通并完成真机验证；功能仍在持续打磨，建议先小范围试用，异常可用状态栏「■ 停止全自动」随时接管。
