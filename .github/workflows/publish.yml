@@ -98,10 +98,12 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     steps:
+      # 始终检出 main：release 脚本在 main 上；inputs.tag 只是建 Release 的目标 tag，
+      # 若按 tag 检出会拿到旧 commit（脚本尚未加入），导致找不到脚本。
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ inputs.tag || github.ref }}
+          ref: main
 
       - uses: actions/setup-node@v7
         with:
