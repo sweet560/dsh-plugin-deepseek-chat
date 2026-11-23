@@ -2,9 +2,11 @@
 
 English | [中文](README.md)
 
-> **Current version: v1.4.0** | Targets DSH **0.2.2-rc.3**
+> **Current version: v1.4.6** | Targets DSH **0.2.2-rc.5**
 >
-> ⚠️ **The "Full auto-pilot channel" is experimental and has NOT been tested on a real machine** (offline self-check only). Please try it in a small scope first; use the status bar "■ Stop auto-pilot" to take over anytime. See [RELEASE_NOTES_v1.4.0.md](docs/RELEASE_NOTES_v1.4.0.md).
+> ✅ **The full auto-pilot flow has passed initial real-machine verification and is being refined.** The three-way chain (web reviewer agent ⇄ desktop dev agent ⇄ you as decision maker) now runs unattended through the auto-pilot channel and has been verified on a real machine; it is still being polished — try it in a small scope first, and take over anytime with the status bar "■ Stop auto-pilot".
+>
+> ⚠️ **The "Full auto-pilot channel" is still experimental**: real-machine verification fixed the loop where "done text inside the block was re-submitted as a new task", the error-keyword false positive, and the decision card with no continue entry. See [RELEASE_NOTES_v1.4.6.md](docs/RELEASE_NOTES_v1.4.6.md).
 > [GitHub](https://github.com/sweet560/dsh-plugin-deepseek-chat) | [Gitee mirror](https://gitee.com/wtt520wyl/dsh-plugin-deepseek-chat)
 
 Embeds `chat.deepseek.com` in DSH and **two-way bridges desktop conversations with the web chat** into an automation tool. npm package: `@tianyulinfeng1/dsh-plugin-deepseek-chat`.
@@ -17,18 +19,22 @@ Embeds `chat.deepseek.com` in DSH and **two-way bridges desktop conversations wi
 
 - **Three entries**: sidebar icon, conversation-header tab, and right-sidebar card (default name "DeepSeek Chat", each switchable / renameable) — all open the same full-area web chat and remember the last conversation.
 - **Conditional auto-loop** (opt-in): a finished desktop turn → auto-transfer to the web and send → grab the web reply → **write only into the desktop draft**, never auto-executed; whether to continue is always your call. Three safety valves: max loops / error-keyword breaker / per-turn dedup.
+- **One-click DeepSeek / Doubao platform switch** (v1.4.2): the settings page offers two buttons; selecting a platform applies its web URL plus dedicated DOM selectors as a bundle, so the auto-loop and auto-pilot keep working (Doubao uses `https://www.doubao.com/chat/`). Default is DeepSeek. Takes effect instantly.
 - **Full auto-pilot channel** (v1.4.0, opt-in): desktop session = dev agent, web chat = reviewer, you = decision maker, chained into an unattended loop. The reviewer's reply is **extracted only from the `<TO_DEV>…</TO_DEV>` block** (the full page text is NEVER delivered — saving context and tokens) and **auto-submits the next turn via the official `conversation.send`**; hitting a done / restart / handoff (e.g. "please restart the host for acceptance") / same-text-twice / error / max-loops condition **pauses on a decision card** (continue / edit / retry / terminate), with one-click start/stop in the status bar and takeover anytime.
 - **Half-automatic bring-back** (opt-in): instead of scraping the web DOM, paste the web reply or exported JSON manually to avoid timeouts.
 - **Settings page**: toggles, renaming, loop & auto-pilot config, About, check for updates, one-click update.
+- **Fixed status bar** (v1.4.3): the chat status bar stays visible without enabling the trigger toggle — loop count / binding / start-stop always at a glance; one-click auto-pilot start (your click is the authorization).
+- **Two mutually exclusive modes** (v1.4.4): "Bind current session" enables the trigger mode; "Start auto-pilot" turns the trigger off and switches to full-auto; "Stop auto-pilot" fully stops both switches; "Switch to semi-auto" reuses the existing binding to return to trigger mode in one click — no unbind/rebind (v1.4.6). The engine master switch is decoupled, so switching never interrupts the pipeline.
+- **Native Modal decision card** (v1.4.6): on a done / restart / handoff / error / max-loops condition, a native-looking DSH modal pops up (centered, dimmed backdrop, title bar with close ×, separated content, tidy footer buttons); the question and options are generated from the intercepted content at runtime instead of hard-coded. Every card type carries a "Continue & re-push this reply" entry so the chain can resume.
 - **Stability**: webview crash containment — shows a Retry card in the panel instead of blanking the whole app.
 
-> For the backstory, implementation details and per-release changes, see [CHANGELOG.md](CHANGELOG.md); the current release is detailed in [RELEASE_NOTES_v1.4.0.md](docs/RELEASE_NOTES_v1.4.0.md).
+> For the backstory, implementation details and per-release changes, see [CHANGELOG.md](CHANGELOG.md); the current release is detailed in [RELEASE_NOTES_v1.4.6.md](docs/RELEASE_NOTES_v1.4.6.md).
 
 ## Requirements
 
 | Item | Requirement |
 |---|---|
-| DSH | Desktop `0.2.2-rc.3` or newer |
+| DSH | Desktop `0.2.2-rc.5` or newer |
 | Platform | Windows / macOS / Linux desktop shell |
 | git | Only needed for the GitHub install method |
 
@@ -87,6 +93,12 @@ Only major milestones are listed; the full per-release log is in **[CHANGELOG.md
 
 | Version | Milestone |
 |---|---|
+| **1.4.6** | Full auto-pilot flow passed initial real-machine verification (ongoing refinement): native Modal decision card + dynamic question/options, error-keyword word-boundary fix, full stop + one-click switch back to semi-auto, "continue & re-push" on every card |
+| **1.4.5** | Fixed full-auto loop: pure done text inside the delimited block (e.g. "task completed") now ends the chain instead of being re-submitted as a new task; targets DSH 0.2.2-rc.5 |
+| **1.4.4** | Trigger / full-auto mutually exclusive modes: binding enables trigger, auto-pilot turns it off, engine master switch decoupled |
+| **1.4.3** | Fixed status bar: always visible without enabling the trigger; one-click auto-pilot start (click = authorization) |
+| **1.4.2** | One-click DeepSeek / Doubao switch: URL + dedicated DOM selectors as a bundle, auto-loop / auto-pilot follow |
+| **1.4.1** | Custom chat web URL in settings (default DeepSeek, switchable to Doubao) |
 | **1.4.0** | Full auto-pilot channel (delimited-block extraction + official `conversation.send` auto-submit + decision card) |
 | **1.3.0** | Manual session bind + status-bar settings gear + session title |
 | **1.2.1** | Half-automatic bring-back (structured parsing of official exports) |

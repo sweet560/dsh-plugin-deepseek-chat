@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "DeepSeek Chat",
-    "description": "Embeds chat.deepseek.com and two-way bridges desktop conversations with the web chat: three chat entries, an optional auto-loop (web reply → desktop draft only), and a v1.4.0 full auto-pilot channel that extracts a delimited review block, auto-submits the next turn via official conversation.send and pauses on a decision card you control."
+    "description": "Embeds a configurable web chat URL with one-click DeepSeek / Doubao platform presets (URL plus dedicated DOM selectors switch together, so the auto-loop and auto-pilot keep working) and two-way bridges desktop conversations with the web chat: three chat entries, an optional auto-loop (web reply → desktop draft only), and a full auto-pilot channel that extracts a delimited review block, auto-submits the next turn via official conversation.send and pauses on a native Modal decision card you control (centered overlay, dimmed backdrop, question and options generated from the intercepted content, with a continue-and-re-push entry). The status bar stays fixed; bind a session for trigger mode, start auto-pilot for full-auto, stop auto-pilot to fully halt, and switch back to semi-auto in one click reusing the binding. Full auto-pilot flow passed initial real-machine verification and is being refined."
   }
 }

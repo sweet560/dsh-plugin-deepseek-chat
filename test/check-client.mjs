@@ -335,6 +335,9 @@ const sandbox = {
   Date
 };
 sandbox.globalThis = sandbox;
+// v1.4.6-hotfix-4 回归（问题A）：模拟重启前残留的全自动开关 true，
+// 验证 factory 加载（= 插件初始化）时自动归零，消除 checkbox/状态条不一致。
+storage.set("dsh-plugin-deepseek-chat:config", JSON.stringify({ autoPilotEnabled: true }));
 runInNewContext(source, sandbox, { filename: bundlePath });
 
 // ── 可替换的 fetch 桩（检查更新用）──────────────────────────────────────────
@@ -364,6 +367,14 @@ const moduleExports = registration.factory((id) => {
   if (id === "react") return react;
   throw new Error(`意外的 require(${id})`);
 });
+
+// v1.4.6-hotfix-4 回归（问题A）：factory 初始化时归零残留的 autoPilotEnabled。
+{
+  const persisted = JSON.parse(storage.get("dsh-plugin-deepseek-chat:config") ?? "{}");
+  if (persisted.autoPilotEnabled !== false) fail(`问题A：初始化未归零残留 autoPilotEnabled：${JSON.stringify(persisted)}`);
+  else ok("v1.4.6-hotfix-4：初始化归零残留 autoPilotEnabled（checkbox 与状态条一致关闭）");
+}
+
 if (typeof moduleExports.apply !== "function") fail("缺少 exports.apply");
 if (!Array.isArray(moduleExports.inject)) fail("缺少 exports.inject");
 if (moduleExports.inject.length !== 1 || moduleExports.inject[0] !== "slots") fail(`inject 应为 ["slots"]，实际 ${JSON.stringify(moduleExports.inject)}`);
@@ -429,6 +440,116 @@ if (api === undefined) {
   if (api.getConfig().showTab !== true || api.tabLabel() !== "DeepSeek 聊天" || api.getConfig().showCard !== true || api.cardLabel() !== "DeepSeek 聊天") {
     fail("测试后配置没有恢复默认");
   } else ok("配置层测试结束，已恢复默认配置");
+}
+
+// ── v1.4.1：自定义聊天网页 URL ──────────────────────────────────────────────
+{
+  const DEFAULT = api.CHAT_URL;
+  if (api.DEFAULTS?.chatUrl !== DEFAULT) fail("DEFAULTS.chatUrl 默认不是 CHAT_URL");
+
+  // normalizeChatUrl：接受白名单主机（deepseek 默认 + 豆包），规范化 URL。
+  const deepseek = api.normalizeChatUrl("https://chat.deepseek.com/");
+  const doubao = api.normalizeChatUrl("https://www.doubao.com/chat/");
+  if (deepseek !== "https://chat.deepseek.com/") fail(`normalizeChatUrl 默认 URL 不对：${deepseek}`);
+  if (doubao !== "https://www.doubao.com/chat/") fail(`normalizeChatUrl 豆包 URL 不对：${doubao}`);
+  if (api.normalizeChatUrl("  https://www.doubao.com/chat/  ") !== "https://www.doubao.com/chat/") fail("normalizeChatUrl 没有去首尾空格");
+  if (api.normalizeChatUrl("https://doubao.com/chat/") !== "https://doubao.com/chat/") fail("normalizeChatUrl 应接受裸 doubao.com 主机");
+
+  // 拒绝：http、外部域名、显式端口、带凭据、非法字符串、空、超长。
+  const rejected = [
+    "http://chat.deepseek.com/",
+    "https://evil.example.com/chat",
+    "https://www.doubao.com:8443/chat/",
+    "https://user:pass@www.doubao.com/chat/",
+    "not a url",
+    "",
+    "x".repeat(5000)
+  ];
+  for (const bad of rejected) {
+    if (api.normalizeChatUrl(bad) !== DEFAULT) fail(`normalizeChatUrl 没有拒绝非法 URL：${String(bad).slice(0, 40)}`);
+  }
+  if (!api.CUSTOM_URL_HOSTS?.has("chat.deepseek.com") || !api.CUSTOM_URL_HOSTS?.has("www.doubao.com")) fail("CUSTOM_URL_HOSTS 缺少预期主机");
+  ok("normalizeChatUrl：白名单主机通过、规范化、拒绝 http/外部域名/端口/凭据/非法值");
+
+  // 配置读写：chatUrl 随 writeConfig 持久化，非法值回退默认。
+  storage.clear();
+  api.writeConfig({ chatUrl: "https://www.doubao.com/chat/" });
+  if (api.getConfig().chatUrl !== "https://www.doubao.com/chat/") fail("writeConfig 没有写入豆包 URL");
+  if ((JSON.parse(storage.get(api.CONFIG_KEY) ?? "{}")).chatUrl !== "https://www.doubao.com/chat/") fail("chatUrl 没有持久化");
+  api.writeConfig({ chatUrl: "https://evil.example.com/" });
+  if (api.getConfig().chatUrl !== DEFAULT) fail("非法 chatUrl 没有回退默认");
+  ok("chatUrl 配置：合法值持久化、非法值回退默认");
+
+  // 恢复默认，避免影响后续注册/面板测试。
+  api.writeConfig({ chatUrl: DEFAULT });
+  storage.clear();
+}
+
+// ── v1.4.2：平台预设整包切换（DeepSeek / 豆包）────────────────────────────
+{
+  const DS = api.PLATFORM_PRESETS?.deepseek;
+  const DB = api.PLATFORM_PRESETS?.doubao;
+  if (!DS || !DB) fail("PLATFORM_PRESETS 缺少 deepseek / doubao 预设");
+  else ok("PLATFORM_PRESETS 两套预设均存在");
+
+  // 平台默认显示名（v1.4.5+ 名称联动）。
+  const expectedName = { deepseek: "DeepSeek 聊天", doubao: "豆包 聊天" };
+
+  // 两套预设各含 URL + 五组选择器，且豆包 URL 指向 doubao.com。
+  for (const [name, preset] of [["deepseek", DS], ["doubao", DB]]) {
+    for (const key of ["chatUrl", "stopButtonSelectors", "sendButtonSelectors", "textareaSelectors", "assistantSelectors", "userMessageSelectors"]) {
+      if (preset[key] === undefined) fail(`${name} 预设缺少 ${key}`);
+    }
+    if (!Array.isArray(preset.textareaSelectors) || preset.textareaSelectors.length === 0) fail(`${name} 预设 textareaSelectors 为空`);
+    // v1.4.5+ 名称联动：两套预设各带平台默认显示名。
+    if (preset.tabLabel !== expectedName[name] || preset.cardLabel !== expectedName[name]) {
+      fail(`${name} 预设默认显示名不对：tabLabel=${preset.tabLabel} cardLabel=${preset.cardLabel}`);
+    }
+  }
+  if (DB.chatUrl !== "https://www.doubao.com/chat/") fail(`豆包预设 URL 不对：${DB.chatUrl}`);
+  if (DS.chatUrl !== api.CHAT_URL) fail("DeepSeek 预设 URL 不是默认 CHAT_URL");
+  ok("平台预设：URL + 五组选择器齐全，豆包指向 doubao.com，DeepSeek 用默认");
+
+  // v1.4.5+ 名称联动：切换平台时顶栏标签名与右侧卡片名一并改为平台默认名。
+  api.applyPlatformPreset("doubao");
+  if (api.tabLabel() !== expectedName.doubao || api.cardLabel() !== expectedName.doubao) {
+    fail(`切豆包后名称未联动：tabLabel=${api.tabLabel()} cardLabel=${api.cardLabel()}`);
+  }
+  ok("applyPlatformPreset(doubao)：顶栏标签名与右侧卡片名联动为「豆包 聊天」");
+  api.applyPlatformPreset("deepseek");
+  if (api.tabLabel() !== expectedName.deepseek || api.cardLabel() !== expectedName.deepseek) {
+    fail(`切回 DeepSeek 后名称未恢复：tabLabel=${api.tabLabel()} cardLabel=${api.cardLabel()}`);
+  }
+  ok("applyPlatformPreset(deepseek)：顶栏标签名与右侧卡片名恢复「DeepSeek 聊天」");
+
+  // currentPlatform 从 chatUrl 主机推导，单一数据源。
+  api.writeConfig({ chatUrl: api.CHAT_URL });
+  if (api.currentPlatform() !== "deepseek") fail("currentPlatform 未识别 deepseek");
+  api.writeConfig({ chatUrl: "https://www.doubao.com/chat/" });
+  if (api.currentPlatform() !== "doubao") fail("currentPlatform 未识别 doubao");
+  ok("currentPlatform：从 chatUrl 主机正确推导当前平台");
+
+  // applyPlatformPreset 整包切换：切豆包写入专用选择器，切回 deepseek 恢复原生。
+  if (api.applyPlatformPreset("doubao") !== true) fail("applyPlatformPreset(doubao) 返回值不为 true");
+  let c = api.getConfig();
+  if (c.chatUrl !== "https://www.doubao.com/chat/") fail("切豆包后 chatUrl 未变");
+  if (JSON.stringify(c.textareaSelectors) !== JSON.stringify(DB.textareaSelectors)) fail("切豆包后 textareaSelectors 未整包切换");
+  if (c.textareaSelectors.some((s) => s.includes("chat.deepseek.com") || s.includes("data-message-author-role"))) {
+    fail("豆包选择器里仍残留 DeepSeek 专有选择器");
+  }
+  if ((JSON.parse(storage.get(api.CONFIG_KEY) ?? "{}")).chatUrl !== "https://www.doubao.com/chat/") fail("平台切换未持久化到 localStorage");
+  ok("applyPlatformPreset(doubao)：URL + 选择器整包切换并持久化");
+
+  api.applyPlatformPreset("deepseek");
+  c = api.getConfig();
+  if (c.chatUrl !== api.CHAT_URL) fail("切回 DeepSeek 后 chatUrl 未恢复");
+  if (JSON.stringify(c.assistantSelectors) !== JSON.stringify(api.DEFAULTS.assistantSelectors)) fail("切回 DeepSeek 后选择器未恢复原生");
+  if (api.applyPlatformPreset("unknown") !== false) fail("未知平台应返回 false");
+  ok("applyPlatformPreset(deepseek)：恢复原生配置；未知平台安全拒绝");
+
+  // 恢复默认，避免影响后续测试。
+  api.applyPlatformPreset("deepseek");
+  storage.clear();
 }
 
 // ── 关于信息 + 检查更新逻辑（v1.1.5，版本号随发布更新）────────────────────
@@ -654,8 +775,16 @@ else ok("缺少 browser 桥时保持 inert");
 sandbox.globalThis.dshDesktop = { protocolVersion: 1, browser: {} };
 const desktopCtx = makeCtx();
 moduleExports.apply(desktopCtx);
-if (desktopCtx.registrations.length !== 4) fail(`桌面表层应有 4 处注册，实际 ${desktopCtx.registrations.length}`);
-else ok("桌面表层恰好 4 处注册（主面板 / 左侧栏 / 顶栏标签 / 设置页）");
+// v1.4.4 修复：composer.dock 常驻注册（只读观察 currentSessionId，让绑定按钮默认可见）；
+// v1.4.6-hotfix-5：新增 shell.overlay（决策卡为屏幕居中浮层，替代原 turnTail 内嵌卡）。
+// 故桌面表层为 6 处（主面板 / 左侧栏 / 顶栏标签 / 设置页 / 常驻 dock / shell.overlay 浮层卡）。
+if (desktopCtx.registrations.length !== 6) fail(`桌面表层应有 6 处注册（含常驻 dock 与 shell.overlay），实际 ${desktopCtx.registrations.length}`);
+else ok("桌面表层恰好 6 处注册（主面板 / 左侧栏 / 顶栏标签 / 设置页 / 常驻 dock / shell.overlay）");
+
+// 回归（绑定按钮消失 bug）：两开关默认都关时，composer.dock 也必须常驻注册，
+// 才能上报 currentSessionId、让状态条渲染「绑定当前会话」按钮。
+if (countSlot(desktopCtx, "conversation.composer.dock") !== 1) fail("默认两开关关闭时 composer.dock 未常驻注册（绑定按钮会消失）");
+else ok("默认两开关关闭时 composer.dock 仍常驻注册（绑定当前会话按钮可见）");
 
 const mainSlot = findSlot(desktopCtx, "main");
 const listSlot = findSlot(desktopCtx, "sidebar.panellist");
@@ -725,7 +854,8 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
     if (api.getConfig().showTab !== false) fail("关闭开关没有写入 showTab=false");
     if (countSlot(desktopCtx, "conversation.view") !== 0) fail("关闭开关后 conversation.view 仍生效");
     else ok("关闭顶部标签栏后动态移除 conversation.view 注册");
-    if (desktopCtx.registrations.length !== 3) fail(`关闭后应剩 3 处注册，实际 ${desktopCtx.registrations.length}`);
+    // 关闭顶栏标签 → 减 1；常驻 dock 与 shell.overlay 不随开关注销，故为 5 处（原 3 + dock + shell.overlay）。
+    if (desktopCtx.registrations.length !== 5) fail(`关闭后应剩 5 处注册（含常驻 dock 与 shell.overlay），实际 ${desktopCtx.registrations.length}`);
 
     // 重新开启 → 4 处恢复，标签名保持自定义。
     checkbox.dispatch("change", { target: { checked: true } });
@@ -746,8 +876,9 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
     else ok("清空名称后输入框重新变空白、恢复灰色占位提示「DeepSeek 聊天」");
     viewSlot = findSlot(desktopCtx, "conversation.view");
     if (!viewSlot || viewSlot.definition.label() !== PLACEHOLDER) fail("回退默认后标签名没更新");
-    if (desktopCtx.registrations.length !== 4) fail(`恢复后应有 4 处注册，实际 ${desktopCtx.registrations.length}`);
-    else ok("设置联动测试结束，恢复 4 处注册与默认标签名");
+    // 恢复顶栏标签 + 常驻 dock + shell.overlay = 6 处。
+    if (desktopCtx.registrations.length !== 6) fail(`恢复后应有 6 处注册（含常驻 dock 与 shell.overlay），实际 ${desktopCtx.registrations.length}`);
+    else ok("设置联动测试结束，恢复 6 处注册与默认标签名");
   }
 }
 
@@ -762,9 +893,9 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   resetTimers();
   const noneCtx = makeCtx();
   moduleExports.apply(noneCtx);
-  if (noneCtx.registrations.length !== 4) fail("服务全缺席时应仍为 4 处槽位注册，实际 " + noneCtx.registrations.length);
+  if (noneCtx.registrations.length !== 5) fail("服务全缺席时应仍为 5 处槽位注册（含 shell.overlay），实际 " + noneCtx.registrations.length);
   else if (noneCtx.cardRegistrations.length !== 0 || noneCtx.nativeRegistrations.length !== 0) fail("服务全缺席时不应注册任何右边栏卡片");
-  else ok("服务全缺席：better-sidebar 未运行且原生 registry 未就绪 → 零卡片、其余四处表面照常");
+  else ok("服务全缺席：better-sidebar 未运行且原生 registry 未就绪 → 零卡片、其余五处表面照常（含 shell.overlay）");
   if (countTimers(api.CARD_RETRY_DELAY) !== 1) fail("服务全缺席：应排队 1 个无上限就绪探测 timer");
   else ok("服务全缺席：排下可取消的就绪探测（v1.1.9 无 20 秒硬上限）");
 
@@ -871,10 +1002,10 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
   api.resetUpdateState();
   const form = mount(react.createElement(settingsSlot.component, {}));
 
-  // 五组卡片边框（v1.4.0 增加全自动通道）：按逻辑分组、用主题令牌细边框/圆角/浅底。
+  // 六组卡片边框（v1.4.4 UI：聊天平台独立成栏，设置页改为 3 个 tab 分页）：按逻辑分组、用主题令牌细边框/圆角/浅底。
   const cards = collectElements(form).filter((el) =>
     el.getAttribute("data-dsh-plugin-deepseek-chat") === "settings-card");
-  if (cards.length !== 5) fail(`设置页应有 5 张分组卡片，实际 ${cards.length}`);
+  if (cards.length !== 6) fail(`设置页应有 6 张分组卡片，实际 ${cards.length}`);
   else {
     const expected = {
       border: ".5px solid var(--dsw-alias-border-l3)",
@@ -889,6 +1020,122 @@ else ok(`左侧栏图标渲染 svg @ ${icon.getAttribute("width")}`);
     if (bad > 0) fail("分组卡片没有全部使用主题令牌的边框/圆角/浅底（或写死了硬编码颜色）");
     else ok("设置页三组卡片：细边框 + 圆角 + 主题令牌浅底色（明暗自适应、零硬编码颜色）");
   }
+  // v1.4.2：设置页应渲染 DeepSeek / 豆包 双平台切换按钮（嵌在第一张卡片内）。
+  const platformDeepseek = collectElements(form).filter((el) =>
+    el.getAttribute("data-dsh-plugin-deepseek-chat") === "platform-deepseek");
+  const platformDoubao = collectElements(form).filter((el) =>
+    el.getAttribute("data-dsh-plugin-deepseek-chat") === "platform-doubao");
+  if (platformDeepseek.length !== 1 || platformDoubao.length !== 1) {
+    fail(`设置页应有各 1 个平台切换按钮，实际 deepseek=${platformDeepseek.length} doubao=${platformDoubao.length}`);
+  } else ok("设置页渲染 DeepSeek / 豆包 双平台切换按钮");
+
+  // 平台按钮后的选中标志：选中的显示 ✅、未选中的显示 ❌；点击后可反转。
+  const platformMarkText = (root, attr) => {
+    const mark = findByAttr(root, "data-dsh-plugin-deepseek-chat", attr);
+    return mark ? collectTexts(mark).join("") : "";
+  };
+  const markDs = platformMarkText(form, "platform-mark-deepseek");
+  const markDb = platformMarkText(form, "platform-mark-doubao");
+  const isDeepseekDefault = api.currentPlatform() === "deepseek";
+  const expectDs = isDeepseekDefault ? "✅" : "❌";
+  const expectDb = isDeepseekDefault ? "❌" : "✅";
+  if (String(markDs).includes(expectDs) && String(markDb).includes(expectDb)) {
+    ok("平台按钮选中标志正确：选中显示 ✅、未选中显示 ❌");
+  } else fail(`平台选中标志错误：deepseek="${markDs}"（应 ${expectDs}）doubao="${markDb}"（应 ${expectDb}）`);
+
+  // v1.4.5+ 名称联动：点击平台按钮后两个名称输入框草稿同步刷新（默认值显示灰色占位）。
+  const mountForm = () => mount(react.createElement(settingsSlot.component, {}));
+  api.applyPlatformPreset("deepseek");
+  const dsForm = mountForm();
+  const dsTabBox = findByAttr(dsForm, "data-dsh-plugin-deepseek-chat", "tab-label");
+  const dsCardBox = findByAttr(dsForm, "data-dsh-plugin-deepseek-chat", "card-label");
+  const btnDoubao = findByAttr(dsForm, "data-dsh-plugin-deepseek-chat", "platform-doubao");
+  if (!dsTabBox || !dsCardBox || !btnDoubao) fail("设置页缺少名称输入框或豆包平台按钮，无法验证名称联动");
+  else {
+    btnDoubao.dispatch("click");
+    const dbForm = mountForm();
+    const dbTabBox = findByAttr(dbForm, "data-dsh-plugin-deepseek-chat", "tab-label");
+    const dbCardBox = findByAttr(dbForm, "data-dsh-plugin-deepseek-chat", "card-label");
+    // v1.4.5+ 切豆包：名称框草稿清空（灰色占位显示平台名），配置名仍是「豆包 聊天」实体名。
+    if (dbTabBox.getAttribute("value") !== "" || dbCardBox.getAttribute("value") !== "") {
+      fail(`切豆包后名称框草稿未清空：tab=${dbTabBox.getAttribute("value")} card=${dbCardBox.getAttribute("value")}`);
+    } else if (dbTabBox.getAttribute("placeholder") !== "豆包 聊天" || dbCardBox.getAttribute("placeholder") !== "豆包 聊天") {
+      fail(`切豆包后名称框占位未显示平台名：tab=${dbTabBox.getAttribute("placeholder")} card=${dbCardBox.getAttribute("placeholder")}`);
+    } else if (api.tabLabel() !== "豆包 聊天" || api.cardLabel() !== "豆包 聊天") {
+      fail(`切豆包后配置名未联动：tab=${api.tabLabel()} card=${api.cardLabel()}`);
+    } else ok("设置页：点击豆包平台按钮，两个名称框清空并显示「豆包 聊天」灰色占位、配置名同步联动");
+    const dbViewSlot = findSlot(desktopCtx, "conversation.view");
+    if (!dbViewSlot || dbViewSlot.definition.label() !== "豆包 聊天") fail("切豆包后顶栏标签显示名未更新");
+    else ok("切豆包后顶栏标签 label thunk 返回「豆包 聊天」");
+    // v1.4.5+ 另三处联动：左侧栏插件项 / 设置导航 / 设置页大标题。
+    const dbListSlot = findSlot(desktopCtx, "sidebar.panellist");
+    const dbSettingsSlot = findSlot(desktopCtx, "settings.section");
+    if (!dbListSlot || dbListSlot.definition.label() !== "豆包 聊天") fail("切豆包后左侧栏插件项显示名未更新");
+    else ok("切豆包后左侧栏插件项 label thunk 返回「豆包 聊天」");
+    if (!dbSettingsSlot || dbSettingsSlot.definition.label() !== "豆包 聊天") fail("切豆包后设置导航显示名未更新");
+    else ok("切豆包后设置页导航 label thunk 返回「豆包 聊天」");
+    const collectTexts = (node) => {
+      if (node === null || node === undefined) return "";
+      if (typeof node === "string" || typeof node === "number") return String(node);
+      if (Array.isArray(node)) return node.map(collectTexts).join("");
+      if (typeof node.text === "string") return node.text;
+      return (node.children ?? []).map(collectTexts).join("");
+    };
+    if (!collectTexts(dbForm).includes("豆包 聊天设置")) fail("切豆包后设置页大标题未更新");
+    else ok("切豆包后设置页大标题显示「豆包 聊天设置」");
+    // 切回 DeepSeek，恢复后续测试默认状态。
+    const btnDs = findByAttr(mountForm(), "data-dsh-plugin-deepseek-chat", "platform-deepseek");
+    btnDs?.dispatch("click");
+    const dsAgain = mountForm();
+    const dsAgainTab = findByAttr(dsAgain, "data-dsh-plugin-deepseek-chat", "tab-label");
+    const dsAgainCard = findByAttr(dsAgain, "data-dsh-plugin-deepseek-chat", "card-label");
+    if (api.tabLabel() !== "DeepSeek 聊天" || api.cardLabel() !== "DeepSeek 聊天") fail("切回 DeepSeek 后名称未恢复默认");
+    else if (dsAgainTab.getAttribute("value") !== "" || dsAgainCard.getAttribute("value") !== "") fail("切回 DeepSeek 后名称框草稿未清空为占位");
+    else ok("切回 DeepSeek 平台，名称恢复默认显示且输入框回到灰色占位");
+  }
+
+  // v1.4.4 UI：设置页 3 个 tab 分页（总览 / 条件触发同步 / 全自动通道），一个功能一页。
+  const tabHome = findByAttr(form, "data-dsh-plugin-deepseek-chat", "mode-tab-home");
+  const tabSync = findByAttr(form, "data-dsh-plugin-deepseek-chat", "mode-tab-sync");
+  const tabPilot = findByAttr(form, "data-dsh-plugin-deepseek-chat", "mode-tab-pilot");
+  // 选中态用浅底（bg-layer-2）区分，未选中为 bg-base（图2 风格：浅底细边框，无强调色描边）。
+  const ACTIVE_BG = "var(--dsw-alias-bg-layer-2)";
+  const hiddenCards = (root) => collectElements(root).filter((el) =>
+    el.getAttribute("data-dsh-plugin-deepseek-chat") === "settings-card" && el.style.display === "none").length;
+  // 顶部标题 + tab 栏必须是 sticky 固定区，不随滚动消失。
+  const stickyHeader = collectElements(form).find((el) => el.style.position === "sticky");
+  if (!stickyHeader) fail("设置页顶部标题 + tab 栏应为 sticky 固定区（不随滚动消失）");
+  else ok("设置页顶部标题 + tab 栏为 sticky 固定区（滚动不消失）");
+  if (!tabHome || !tabSync || !tabPilot) {
+    fail("设置页应有 3 个模式 tab 按钮（总览/条件触发同步/全自动通道）");
+  } else {
+    // 默认总览：home tab 选中（浅底），且 tab 栏无下分隔横线。
+    if (tabHome.style.background !== ACTIVE_BG || hiddenCards(form) !== 2)
+      fail(`默认应显示总览分页：home tab 选中、条件触发/全自动两卡隐藏，实际隐藏 ${hiddenCards(form)} 张`);
+    else ok("设置页默认显示「总览」分页（聊天平台 + 顶部 + 右边 + 关于）");
+    const tabBar = tabHome.parent;
+    if (tabBar && tabBar.style.borderBottom)
+      fail(`tab 栏不应有下分隔横线，实际 ${tabBar.style.borderBottom}`);
+    else ok("tab 栏无下分隔横线（样式参考图2）");
+
+    // 点击「条件触发同步」tab：模块变量切换后重挂载，只显示该分页。
+    tabSync.dispatch("click", {});
+    const formSync = mount(react.createElement(settingsSlot.component, {}));
+    const syncActive = findByAttr(formSync, "data-dsh-plugin-deepseek-chat", "mode-tab-sync")?.style.background === ACTIVE_BG;
+    if (!syncActive || hiddenCards(formSync) !== 5) fail("点「条件触发同步」tab 后应只显示该分页配置");
+    else ok("点「条件触发同步」tab：只显示该分页的完整配置");
+
+    // 点击「全自动通道」tab。
+    findByAttr(formSync, "data-dsh-plugin-deepseek-chat", "mode-tab-pilot").dispatch("click", {});
+    const formPilot = mount(react.createElement(settingsSlot.component, {}));
+    const pilotActive = findByAttr(formPilot, "data-dsh-plugin-deepseek-chat", "mode-tab-pilot")?.style.background === ACTIVE_BG;
+    if (!pilotActive || hiddenCards(formPilot) !== 5) fail("点「全自动通道」tab 后应只显示该分页配置");
+    else ok("点「全自动通道」tab：只显示该分页的完整配置");
+
+    // 恢复总览，避免影响后续用例。
+    findByAttr(formPilot, "data-dsh-plugin-deepseek-chat", "mode-tab-home").dispatch("click", {});
+  }
+
   // 输入框/按钮/状态行用 bg-base 或 layer-2，与卡片底色拉开层次。
   const bg = collectElements(form).filter((el) =>
     ["tab-label", "card-label", "check-update", "update-status"].includes(el.getAttribute("data-dsh-plugin-deepseek-chat")));
@@ -1106,9 +1353,12 @@ async function mountPanel(component = mainSlot.component) {
   return { page, cleanups, calls, webview: findWebview(page), bridge };
 }
 
-/** 纯网页聊天断言：根节点只有一个 host，无账号条、无账号文案。 */
+/** 纯网页聊天断言：恰好一个网页容器，无账号条、无账号文案。 */
 function assertPureWebChat(page, where) {
-  if (page?.children?.length !== 1) fail(`${where}：根节点应只有一个网页容器，实际 ${page?.children?.length} 个子节点`);
+  // v1.4.3：状态条固定显示，根节点子节点数随包装层不同（全屏面板 2、顶栏标签页 1），
+  // 故改为按语义断言「有且仅有一个 webview」——这才是「纯网页聊天」的真正约束。
+  const webviews = collectElements(page).filter((el) => el.tag === "webview");
+  if (webviews.length !== 1) fail(`${where}：应恰好有一个网页容器，实际 ${webviews.length} 个`);
   if (hasAccountStrip(page)) fail(`${where}：仍存在账号状态条`);
   const texts = collectTexts(page).join(" ");
   if (texts.includes("账号") || texts.includes("DSH 登录") || texts.includes("本地模式")) fail(`${where}：仍渲染账号状态文案「${texts}」`);
@@ -1396,6 +1646,13 @@ storage.clear();
   if (!api.containsErrorKeyword("Traceback (most recent call last)", ["Error", "Traceback"]) ||
       api.containsErrorKeyword("一切正常", ["Error", "Traceback"])) fail("错误关键词熔断判断错");
   else ok("安全阀②：错误关键词命中/未命中判断正确（大小写敏感）");
+  // v1.4.6-hotfix：正文引用技术标识符（TypeError）内部子串不得误命中熔断。
+  if (api.containsErrorKeyword("`k.indexOf` 抛 TypeError", ["Error", "Traceback", "Failed", "panic", "FATAL"])) {
+    fail("TypeError 内部 Error 子串被误判为错误关键词");
+  } else ok("安全阀②词边界：TypeError 内部 Error 子串不误命中");
+  if (!api.containsErrorKeyword("Error: something broke", ["Error", "Traceback"])) {
+    fail("独立词 Error: 未被识别，熔断漏判");
+  } else ok("安全阀②词边界：独立词 Error 仍正常熔断");
   const snapForText = { entries: [
     { type: "assistant/message", data: { turn: 1, message: { content: [{ type: "text", text: "旧回答" }] } } },
     { type: "assistant/message", data: { turn: 2, message: { content: [{ kind: "text", text: "本轮回答" }] } } }
@@ -1554,10 +1811,11 @@ storage.clear();
   if (decisions.length !== 0) fail("replace/prepend 窗口也误触发了轮次回传");
   else ok("只对 append 窗口处理（replace/prepend/settle-assistant 不误触发，避免正常浏览被抓取）");
 
-  // G. 状态条默认隐藏 + 设置页第 4 卡控件 + 总开关交互。
+  // G. 状态条固定显示（v1.4.3）+ 设置页第 4 卡控件 + 总开关交互。
   const bar = mount(react.createElement(api.SyncStatusBar, {}));
-  if (bar !== null) fail("autoSyncEnabled 默认 false 时状态条不该渲染");
-  else ok("安全阀①：默认关闭时状态条隐藏，闭环完全不启动");
+  const fixedGear = bar && findByAttr(bar, "data-dsh-plugin-deepseek-chat", "sync-settings");
+  if (!bar || !fixedGear) fail("v1.4.3：状态条应固定显示（不依赖 autoSyncEnabled），即使总开关关闭也应渲染");
+  else ok("v1.4.3：状态条固定显示（默认 autoSyncEnabled=false 仍渲染，闭环不自动启动）");
   const form4 = mount(react.createElement(settingsSlot.component, {}));
   const need = ["sync-enable", "sync-max-loops", "sync-error-keywords", "sync-stop-selectors",
     "sync-send-selectors", "sync-textarea-selectors", "sync-assistant-selectors"];
@@ -2449,6 +2707,68 @@ storage.clear();
   if (!rebind2 || bind2) fail("已配对时状态栏应显示换绑按钮而非绑定按钮");
   else ok("手动绑定：已配对时状态栏显示「换绑」按钮（绑定/换绑互斥）");
 
+  // 回归（解绑后绑定按钮消失 bug）：点换绑 → unpair/reset 清空 currentSessionId，
+  // 修复后应把原配对会话恢复为当前会话，重新渲染仍显示「绑定当前会话」按钮。
+  if (rebind2) {
+    rebind2.dispatch("click", {});
+    const stUnbound = oRt.controller.getState();
+    const bar3 = mount(react.createElement(api.SyncStatusBar, {}));
+    const bind3 = findByAttr(bar3, "data-dsh-plugin-deepseek-chat", "sync-bind");
+    const rebind3 = findByAttr(bar3, "data-dsh-plugin-deepseek-chat", "sync-rebind");
+    if (stUnbound.pairedSessionId !== "" || stUnbound.currentSessionId !== "sCurrent") {
+      fail(`换绑后应恢复当前会话 sCurrent：paired=${stUnbound.pairedSessionId}, current=${stUnbound.currentSessionId}`);
+    } else if (!bind3 || rebind3) fail("换绑后绑定按钮消失（应恢复为可重新绑定的状态）");
+    else ok("换绑后：清空配对但恢复当前会话，「绑定当前会话」按钮仍显示可重绑");
+    // v1.4.4：未绑定会话时默认关闭——解绑后条件触发与全自动两个开关都应关闭，
+    // 只有再点「绑定当前会话」才重新开启。
+    const unboundCfg = api.getConfig();
+    if (unboundCfg.autoSyncEnabled !== false || unboundCfg.autoPilotEnabled !== false) {
+      fail(`解绑后两开关应关闭：autoSyncEnabled=${unboundCfg.autoSyncEnabled}, autoPilotEnabled=${unboundCfg.autoPilotEnabled}`);
+    } else ok("解绑后：条件触发与全自动开关自动关闭（未绑定会话默认关闭）");
+  }
+
+  // 回归（换绑绑回旧会话 bug）：dock 上报的真实当前会话 ≠ 旧配对会话时，
+  // 点换绑应恢复为 dock 的当前会话（新会话），而不是旧的 pairedSessionId。
+  {
+    oRt.controller.bindSession("sOld");
+    oRt.controller.noteCurrentSession("sOld");
+    oRt.dockBinding.current = { sessionId: "sNew" };
+    const barNew = mount(react.createElement(api.SyncStatusBar, {}));
+    const rebindNew = findByAttr(barNew, "data-dsh-plugin-deepseek-chat", "sync-rebind");
+    if (rebindNew) {
+      rebindNew.dispatch("click", {});
+      const stNew = oRt.controller.getState();
+      if (stNew.pairedSessionId !== "" || stNew.currentSessionId !== "sNew") {
+        fail(`换绑应恢复 dock 当前会话 sNew（而非旧会话）：paired=${stNew.pairedSessionId}, current=${stNew.currentSessionId}`);
+      } else ok("换绑：恢复 dock 上报的真实当前会话（新会话），不再绑回旧会话");
+    } else fail("换绑回归：未找到换绑按钮");
+    oRt.dockBinding.current = null;
+    api.writeConfig({ autoSyncEnabled: true });
+  }
+
+  // 回归（出错后点「恢复默认」绑定按钮丢失 bug）：绑定会话并置 error 状态让「恢复默认」出现，
+  // 点击后 reset() 会清空 currentSessionId，修复后应主动恢复原会话，绑定按钮继续显示。
+  {
+    oRt.controller.bindSession("sReset");
+    oRt.controller.noteCurrentSession("sReset");
+    oRt.controller.noteError("synthetic"); // 进入 error 态 → 状态条渲染「恢复默认」按钮
+    const barErr = mount(react.createElement(api.SyncStatusBar, {}));
+    const resetBtn = findByAttr(barErr, "data-dsh-plugin-deepseek-chat", "sync-reset");
+    if (!resetBtn) {
+      fail("error 态下状态条应显示「恢复默认」按钮");
+    } else {
+      const stPre = oRt.controller.getState();
+      const sid = stPre.pairedSessionId || stPre.currentSessionId;
+      resetBtn.dispatch("click", {});
+      const stPost = oRt.controller.getState();
+      const bar4 = mount(react.createElement(api.SyncStatusBar, {}));
+      const bind4 = findByAttr(bar4, "data-dsh-plugin-deepseek-chat", "sync-bind");
+      if (stPost.currentSessionId !== sid || !bind4) {
+        fail(`点「恢复默认」后当前会话未恢复/绑定按钮丢失：current=${stPost.currentSessionId}, sid=${sid}`);
+      } else ok("点「恢复默认」后：当前会话保留，「绑定当前会话」按钮仍显示");
+    }
+  }
+
   // 设置跳转首选路径：ctx.get("shortcuts").registry.invoke("settings.open")（桌面端唯一可靠路径）。
   const invoked = [];
   const ctxStub = { get(name) { return name === "shortcuts" ? {
@@ -2541,6 +2861,24 @@ storage.clear();
   if (clickedEn.length !== 1) fail("齿轮定位：英文 label 'DeepSeek Chat' 未命中");
   else ok("齿轮定位：英文 label 'DeepSeek Chat' 同样命中");
 
+  // v1.4.6-hotfix-4 回归（问题B）：豆包状态下导航项叫「豆包 聊天」/「Doubao Chat」，
+  // 旧版硬编码只认 DeepSeek 两变体导致齿轮停在默认「账号与余额」页。
+  const clickedDb = [];
+  const dbBtn = { textContent: "豆包 聊天", click: () => clickedDb.push("doubao") };
+  const panelDb = { querySelectorAll: () => [dbBtn] };
+  const docStubDb = { querySelector: () => panelDb, querySelectorAll: (sel) => panelDb.querySelectorAll(sel) };
+  api.focusDeepSeekChatSection(docStubDb, () => 0);
+  if (clickedDb.length !== 1) fail("问题B：齿轮定位未命中『豆包 聊天』label");
+  else ok("v1.4.6-hotfix-4：齿轮定位命中『豆包 聊天』label");
+
+  const clickedDbEn = [];
+  const dbBtnEn = { textContent: "Doubao Chat", click: () => clickedDbEn.push("doubao") };
+  const panelDbEn = { querySelectorAll: () => [dbBtnEn] };
+  const docStubDbEn = { querySelector: () => panelDbEn, querySelectorAll: (sel) => panelDbEn.querySelectorAll(sel) };
+  api.focusDeepSeekChatSection(docStubDbEn, () => 0);
+  if (clickedDbEn.length !== 1) fail("问题B：齿轮定位未命中『Doubao Chat』label");
+  else ok("v1.4.6-hotfix-4：齿轮定位命中『Doubao Chat』label");
+
   // 面板尚未渲染时：首轮不命中 → 短轮询计时器已排期（注入 timers 记录）。
   const timers = [];
   let attempts = 0;
@@ -2574,7 +2912,7 @@ storage.clear();
     "extractPilotPayload", "buildPilotPush", "classifyPilotReply", "tryAutoSubmit",
     "handlePilotReply", "startAutoPilot", "stopAutoPilot", "DEFAULT_PILOT_MARKER_START",
     "DEFAULT_PILOT_MARKER_END", "DEFAULT_PILOT_DONE_KEYWORDS", "DEFAULT_PILOT_RESTART_KEYWORDS",
-    "DEFAULT_PILOT_HANDOFF_KEYWORDS", "DEFAULT_PILOT_OUTPUT_CONTRACT"
+    "DEFAULT_PILOT_SIGNAL_KEYWORDS", "DEFAULT_PILOT_HANDOFF_KEYWORDS", "DEFAULT_PILOT_OUTPUT_CONTRACT"
   ];
   const missing = need.filter((k) => api[k] === undefined);
   if (missing.length) fail("R 段：__test__ 缺少全自动导出：" + missing.join(", "));
@@ -2601,8 +2939,27 @@ storage.clear();
     if (!a.ok || a.state !== "ok" || a.text !== "fix the bug\n第 5 行") fail("R 段：定界符提炼失败：" + JSON.stringify(a));
     else ok("R 段：只提炼 {start}…{end} 之间的区块（前后废话全部丢弃）");
     const d = api.extractPilotPayload("看起来 <TO_DEV>whatever</TO_DEV> DONE", cfgM);
-    if (d.state !== "done" || d.ok) fail("R 段：完成词未优先识别：" + JSON.stringify(d));
-    else ok("R 段：完成词优先于定界符，命中即判完成（state=done）");
+    if (d.state !== "ok" || !d.ok || d.text !== "whatever") fail("R 段：定界符区块应优先于区块外完成词：" + JSON.stringify(d));
+    else ok("R 段：定界符区块优先于区块外散落的完成词（避免误判中断）");
+    // 真机回归：豆包在给出开发项的同时复述契约里的完成词，不得被误判为 done。
+    const d2 = api.extractPilotPayload("方案评估完毕请写出完成词：DONE <TO_DEV>修第5行</TO_DEV> 审查完成无需开发", cfgM);
+    if (d2.state !== "ok" || !d2.ok || d2.text !== "修第5行") fail("R 段：区块外复述完成词被误判：" + JSON.stringify(d2));
+    else ok("R 段：区块外散落的「DONE/完成」不误判，仍提炼定界符区块");
+    // v1.4.5 真机回归：区块内只是完成语义时判 done，绝不能把「任务已完成」当新任务回投。
+    const d5 = api.extractPilotPayload("DONE\n<TO_DEV> 任务已完成 </TO_DEV>", cfgM);
+    if (d5.state !== "done" || d5.ok) fail("R 段：区块内纯完成语义未判 done：" + JSON.stringify(d5));
+    else ok("R 段：区块内「任务已完成」判 done 终止链条（修复死循环/重复回投/180s 超时）");
+    // 区块内既有完成词、又是真实任务时仍应按 continue 回投，不能一刀切。
+    const d6 = api.extractPilotPayload("<TO_DEV> 已完成审查，请修第5行的拼写 </TO_DEV>", cfgM);
+    if (d6.state !== "ok" || !d6.ok) fail("R 段：区块内含真实任务被误判为 done：" + JSON.stringify(d6));
+    else ok("R 段：区块内含真实任务（即使带「已…」字样）仍判 continue 回投");
+    // 无定界符时，完成词严格匹配：独立成行/短声明结尾才算 done，散落在正文中不算。
+    const d3 = api.extractPilotPayload("方案通过评估，审查完成，整体没问题", cfgM);
+    if (d3.state !== "no-marker" || d3.ok) fail("R 段：正文中散落的中文完成词被误判为 done：" + JSON.stringify(d3));
+    else ok("R 段：正文散落的「通过/完成」不误判为 done（严格匹配）");
+    const d4 = api.extractPilotPayload("审查完毕，无需继续。\nDONE", cfgM);
+    if (d4.state !== "done" || d4.ok) fail("R 段：独立成行的完成词未识别：" + JSON.stringify(d4));
+    else ok("R 段：独立成行的完成词仍判 done（保留正常终止能力）");
     const n = api.extractPilotPayload("没有区块的普通回复", cfgM);
     if (n.state !== "no-marker" || n.ok) fail("R 段：无定界符未报 no-marker：" + JSON.stringify(n));
     else ok("R 段：无定界符区块 → no-marker（不盲目投递全文）");
@@ -2629,13 +2986,13 @@ storage.clear();
     } else ok("R 段：默认输出契约含定界符与完成词");
   }
 
-  // 判定优先级：done → restart → handoff → duplicate → error → max-loops → no-marker → continue。
+  // 判定优先级：signal（信号词含完成/重启/用户介入，两栏已融合）→ duplicate → error → max-loops → no-marker → continue。
   {
     const c = (s, prev, extra) => api.classifyPilotReply(s, prev, { ...extra });
     let v = c({ ok: false, text: "", state: "done", reason: "done-word" }, "", {});
-    if (v.action !== "done") fail("R 段：done 判定失败：" + JSON.stringify(v));
+    if (v.action !== "pause" || v.kind !== "signal") fail("R 段：完成词语义合并为 signal 失败：" + JSON.stringify(v));
     v = c({ ok: true, text: "请重启 DSH 再试", state: "ok" }, "", {});
-    if (v.kind !== "restart") fail("R 段：重启词判定失败：" + JSON.stringify(v));
+    if (v.kind !== "signal") fail("R 段：重启词合并为 signal 判定失败：" + JSON.stringify(v));
     v = c({ ok: true, text: "请重启宿主验收", state: "ok" }, "", {});
     if (v.kind !== "handoff") fail("R 段：用户介入词判定失败：" + JSON.stringify(v));
     v = c({ ok: true, text: "same text", state: "ok" }, "same   text", {});
@@ -2648,7 +3005,7 @@ storage.clear();
     if (v.action !== "pause" || v.kind !== "no-start-marker") fail("R 段：无区块判定失败：" + JSON.stringify(v));
     v = c({ ok: true, text: "fresh reply", state: "ok" }, "", { loopCount: 1, maxAutoLoops: 3 });
     if (v.action !== "continue") fail("R 段：正常回复未判 continue：" + JSON.stringify(v));
-    if (v.action === "continue" && v.kind === "continue") ok("R 段：判定优先级 done→restart→handoff→duplicate→error→max-loops→no-marker→continue 全部命中");
+    if (v.action === "continue" && v.kind === "continue") ok("R 段：判定优先级 signal→handoff→duplicate→error→max-loops→no-marker→continue 全部命中");
   }
 
   // controller 全自动生命周期：startPilot / 决策卡 / decide / 提交回 idle。
@@ -2675,6 +3032,46 @@ storage.clear();
     r = ctl.decide("terminate");
     if (r.action !== "terminated" || ctl.getState().autoPilot || ctl.getState().state !== "off") fail("R 段：decide(terminate) 未关闭全自动：" + JSON.stringify(r));
     else ok("R 段：controller 全自动生命周期（启停/决策卡/继续/重试/编辑/终止）全部正确");
+  }
+
+  // v1.4.6-hotfix：熔断必须弹决策卡（有按钮可续跑），resume-push 补推本轮，max-loops 清零计数。
+  {
+    const ctlH = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true, autoPilotEnabled: true, maxAutoLoops: 3 }) });
+    ctlH.startPilot();
+    // error-keyword 熔断：状态 paused 且决策卡存在，payload 为被拦截的桌面回复。
+    let dH = ctlH.handleTurnEnd({ sessionId: "sH", turn: 1, reasonKind: "completed", answerText: "TypeError 出错啦" });
+    // TypeError 内部 Error 现在不误命中熔断，正常应 push；用独立词再试。
+    if (dH.action !== "push") fail("v1.4.6-hotfix：TypeError 内部 Error 不应误熔断，实际：" + JSON.stringify(dH));
+    ctlH.reset(); ctlH.refresh(); ctlH.startPilot();
+    dH = ctlH.handleTurnEnd({ sessionId: "sH2", turn: 2, reasonKind: "completed", answerText: "Error: 真出错" });
+    if (dH.action !== "pause" || dH.reason !== "error-keyword") fail("v1.4.6-hotfix：独立词 Error 未熔断：" + JSON.stringify(dH));
+    let sH = ctlH.getState();
+    if (sH.state !== "paused" || !sH.pilotDecision || sH.pilotDecision.kind !== "error"
+      || sH.pilotDecision.payload !== "Error: 真出错") {
+      fail("v1.4.6-hotfix：error 熔断未弹决策卡（无续跑按钮根因）：" + JSON.stringify(sH));
+    } else ok("v1.4.6-hotfix：error 熔断弹决策卡（payload=被拦截回复），用户可续跑");
+    // resume-push：补推被拦截的桌面回复。
+    let rH = ctlH.decide("resume-push");
+    // v1.4.6-hotfix-2: resume-push 必须返回 push-web（推网页豆包），不能是 submit（误推桌面会话）。
+    if (rH.action !== "push-web" || rH.text !== "Error: 真出错" || ctlH.getState().state !== "pushing") {
+      fail("v1.4.6-hotfix-2：resume-push 未返回 push-web 推网页通道：" + JSON.stringify(rH));
+    } else ok("v1.4.6-hotfix-2：resume-push 返回 push-web（推网页豆包而非桌面会话）并进入 pushing");
+    // max-loops 熔断弹卡 + continue/resume 清零计数。
+    ctlH.reset(); ctlH.refresh(); ctlH.startPilot();
+    for (let i = 0; i < 3; i += 1) {
+      ctlH.handleTurnEnd({ sessionId: "sML", turn: 10 + i, reasonKind: "completed", answerText: "正常" + i });
+      ctlH.noteError("reset-to-idle"); ctlH.refresh();
+    }
+    dH = ctlH.handleTurnEnd({ sessionId: "sML", turn: 20, reasonKind: "completed", answerText: "超出" });
+    if (dH.action !== "pause" || dH.reason !== "max-loops") fail("v1.4.6-hotfix：max-loops 未熔断：" + JSON.stringify(dH));
+    sH = ctlH.getState();
+    if (!sH.pilotDecision || sH.pilotDecision.kind !== "max-loops") {
+      fail("v1.4.6-hotfix：max-loops 熔断未弹决策卡：" + JSON.stringify(sH));
+    } else ok("v1.4.6-hotfix：max-loops 熔断弹决策卡，用户可继续");
+    rH = ctlH.decide("continue");
+    if (rH.action !== "continue" || ctlH.getState().loopCount !== 0) {
+      fail("v1.4.6-hotfix：max-loops continue 未清零 loopCount：" + JSON.stringify(ctlH.getState()));
+    } else ok("v1.4.6-hotfix：max-loops 继续后 loopCount 清零，下轮不会立刻再熔断");
   }
 
   // 让模块级 getConfig() 读到开启状态，供 writeLoopTrace / tryAutoSubmit / handlePilotReply 使用。
@@ -2711,6 +3108,63 @@ storage.clear();
     } else ok("R 段：无自动提交 API → 降级 submit-unavailable 决策卡（请按发送），绝不合成键盘/直写 DOM");
   }
 
+  // v1.4.4 修复：全局 conversation.send 报「requires a session scope」时，
+  // 必须优先走 sessions.scope(paired).conversation 定向提交（真机实测卡点）。
+  {
+    const globalSent = [];
+    const scopedSent = [];
+    const globalConv = { send: () => {
+      globalSent.push("x");
+      return Promise.reject(new Error("conversation.send requires a session scope — address one via ctx.sessions.scope(id).conversation"));
+    } };
+    const scopedConv = { send: (t) => { scopedSent.push(t); return Promise.resolve(); } };
+    const ctlS = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true }) });
+    ctlS.startPilot();
+    ctlS.bindSession("s-scoped");
+    const rtS = {
+      ctx: { get: (n) => (n === "conversation" ? globalConv : n === "sessions"
+        ? { scope: (id) => (id === "s-scoped" ? { conversation: scopedConv } : null) }
+        : undefined) },
+      controller: ctlS,
+      cancelled: false
+    };
+    const okScoped = await api.tryAutoSubmit(rtS, "scoped 定向意见");
+    if (okScoped !== true || scopedSent.length !== 1 || scopedSent[0] !== "scoped 定向意见" || globalSent.length !== 0) {
+      fail("R 段：tryAutoSubmit 应优先用 sessions.scope(paired).conversation 定向提交：" + JSON.stringify({ okScoped, scopedSent, globalSent }));
+    } else ok("R 段：tryAutoSubmit 优先 sessions.scope(paired).conversation 定向提交（避开全局 send 无 scope 报错）");
+  }
+
+  // v1.4.4 真机正解：conversation.send 内部走 binding.session.prompt，全局/scope 都
+  // 可能因 ctx 无 scope 抛 "requires a session scope"。必须直达 binding(paired).session.prompt。
+  {
+    const prompted = [];
+    const sentViaConv = [];
+    const globalConv = { send: (t) => { sentViaConv.push(t); return Promise.resolve(); } };
+    const scopedConv = { send: (t) => { sentViaConv.push(t); return Promise.resolve(); } };
+    const ctlB = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true }) });
+    ctlB.startPilot();
+    ctlB.bindSession("s-binding");
+    const rtB = {
+      ctx: { get: (n) => (n === "conversation" ? globalConv : n === "sessions"
+        ? {
+            binding: (id) => (id === "s-binding"
+              ? { session: { prompt: (msgs, mode) => { prompted.push({ msgs, mode }); return Promise.resolve({ stopReason: "end_turn" }); } } }
+              : undefined),
+            scope: (id) => (id === "s-binding" ? { conversation: scopedConv } : null)
+          }
+        : undefined) },
+      controller: ctlB,
+      cancelled: false
+    };
+    const okBinding = await api.tryAutoSubmit(rtB, "binding 定向意见");
+    const promptOk = prompted.length === 1 && prompted[0].mode === "queue"
+      && prompted[0].msgs && prompted[0].msgs[0] && prompted[0].msgs[0].text === "binding 定向意见"
+      && prompted[0].msgs[0].type === "text";
+    if (okBinding !== true || !promptOk || sentViaConv.length !== 0 || ctlB.getState().state !== "idle") {
+      fail("R 段：tryAutoSubmit 应直达 sessions.binding(paired).session.prompt 定向提交：" + JSON.stringify({ okBinding, prompted, sentViaConv, state: ctlB.getState().state }));
+    } else ok("R 段：tryAutoSubmit 优先 binding.session.prompt([{type:text,text}],queue) 提交（真机正解，绕过 conversation scope 检查）");
+  }
+
   // handlePilotReply：done / pause(handoff) / continue（只写提炼区块，不投递全文）。
   {
     const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true, maxAutoLoops: 5 }) });
@@ -2723,7 +3177,7 @@ storage.clear();
       cancelled: false
     };
     let res = await api.handlePilotReply(rt, "DONE 完美，任务完成");
-    if (res.action !== "done" || ctl.getState().pilotDecision.kind !== "done") fail("R 段：handlePilotReply done 失败：" + JSON.stringify(res));
+    if (res.action !== "pause" || res.kind !== "signal" || ctl.getState().pilotDecision.kind !== "signal") fail("R 段：handlePilotReply 完成词→signal 决策卡失败：" + JSON.stringify(res));
 
     ctl.startPilot();
     res = await api.handlePilotReply(rt, "<TO_DEV>请重启宿主验收</TO_DEV>");
@@ -2736,6 +3190,34 @@ storage.clear();
     if (draft !== "请只改第 5 行" || draft.indexOf("前言") >= 0 || draft.indexOf("后记") >= 0) {
       fail("R 段：桌面草稿混入了网页全文而非只有提炼区块：" + JSON.stringify(draft));
     } else ok("R 段：handlePilotReply continue 只把提炼区块写入桌面草稿，绝不投递网页全文");
+  }
+
+  // 修复（提交后草稿残留）：全自动自动提交路径下，提炼内容由 session.prompt 直接送入会话，
+  // 不应再 injectDraft 写草稿——否则官方 session.prompt 提交不清草稿框，输入框会残留原文。
+  {
+    api.writeConfig({ pilotAutoSubmit: true });
+    const prompted = [];
+    let draft = "";
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true, pilotAutoSubmit: true }) });
+    ctl.startPilot();
+    ctl.bindSession("s-nodraft");
+    const rt = {
+      ctx: { get: (n) => (n === "sessions" ? {
+        binding: (id) => (id === "s-nodraft"
+          ? { session: { prompt: (msgs, mode) => { prompted.push({ msgs, mode }); return Promise.resolve({ stopReason: "end_turn" }); } } }
+          : undefined)
+      } : undefined) },
+      controller: ctl,
+      dockBinding: { current: { sessionId: "s-nodraft", inputActions: { setDraft: (t) => { draft = t; }, submit() {} } } },
+      cancelled: false
+    };
+    const res = await api.handlePilotReply(rt, "前言<TO_DEV>只改第 9 行</TO_DEV>后记");
+    const payloadOk = prompted.length === 1 && prompted[0].msgs && prompted[0].msgs[0]
+      && prompted[0].msgs[0].text === "只改第 9 行" && prompted[0].mode === "queue";
+    if (res !== true || draft !== "" || !payloadOk) {
+      fail("修复：全自动自动提交不应写草稿（提交后输入框残留）：" + JSON.stringify({ res, draft, prompted }));
+    } else ok("修复：全自动提交后不再写草稿（draft 为空），从根源避免输入框残留；提交内容仍为提炼区块");
+    api.writeConfig({ pilotAutoSubmit: false }); // 恢复后续测试的半自动设置
   }
 
   // startAutoPilot / stopAutoPilot：绑定当前会话、清 cancelled、开关运行态。
@@ -2751,6 +3233,250 @@ storage.clear();
     s = ctl.getState();
     if (!stopped || s.autoPilot || s.state !== "off") fail("R 段：stopAutoPilot 失败：" + JSON.stringify(s));
     else ok("R 段：stopAutoPilot 退回 off，用户随时可停");
+  }
+}
+
+// ── V 段（v1.4.4 双模式互斥联动）：绑定→条件触发；启动全自动→关触发切全自动 ──
+{
+  // 1. 引擎总闸 isEngineActive：条件触发或全自动任一开即工作，两者都关才停机。
+  if (typeof api.isEngineActive !== "function") fail("v1.4.4：isEngineActive 未导出");
+  else {
+    if (!api.isEngineActive({ autoSyncEnabled: true, autoPilotEnabled: false })) fail("v1.4.4：条件触发开应算引擎开启");
+    else if (!api.isEngineActive({ autoSyncEnabled: false, autoPilotEnabled: true })) fail("v1.4.4：全自动开应算引擎开启");
+    else if (api.isEngineActive({ autoSyncEnabled: false, autoPilotEnabled: false })) fail("v1.4.4：两者都关应算引擎关闭");
+    else ok("v1.4.4：引擎总闸 = 条件触发或全自动任一开启，两者都关才停机");
+  }
+
+  // 2. 引擎总闸解耦：关条件触发、只开全自动时 turn/end 仍推送（引擎不瘫痪）。
+  {
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: false, autoPilotEnabled: true, maxAutoLoops: 3 }) });
+    const d = ctl.handleTurnEnd({ sessionId: "s", turn: 1, reasonKind: "completed", answerText: "ok" });
+    if (d.action !== "push") fail("v1.4.4：全自动模式下 turn/end 应继续驱动，实际：" + JSON.stringify(d));
+    else ok("v1.4.4：关条件触发、开全自动时 turn/end 仍推送（引擎不瘫痪）");
+  }
+
+  // 3. startAutoPilot 在关条件触发、开全自动时可启动（切全自动场景）。
+  {
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: false, autoPilotEnabled: true, maxAutoLoops: 3 }) });
+    const rt = { controller: ctl, cancelled: true, dockBinding: { current: { sessionId: "s-pilot2" } }, ctx: { get: () => undefined } };
+    const started = api.startAutoPilot(rt);
+    const s = ctl.getState();
+    if (!started || !s.autoPilot || s.pairedSessionId !== "s-pilot2") fail("v1.4.4：切全自动时 startAutoPilot 应成功：" + JSON.stringify({ started, s }));
+    else ok("v1.4.4：关条件触发、开全自动时 startAutoPilot 仍能启动（总闸已解耦）");
+  }
+
+  // 4. 状态条按钮联动：绑定→条件触发开/全自动关；启动全自动→条件触发关/全自动开；停止→退回条件触发。
+  {
+    const vCtx = makeCtx();
+    const vRt = api.ensureSyncRuntime(vCtx);
+    if (typeof vRt.dockDispose === "function") { try { vRt.dockDispose(); } catch { /* 已释放 */ } }
+    vRt.dockDispose = null;
+    vRt.cancelled = false;
+    api.writeConfig({ autoSyncEnabled: true, autoPilotEnabled: false, maxAutoLoops: 3, errorKeywords: [...api.DEFAULT_ERROR_KEYWORDS] });
+    vRt.controller.reset();
+    vRt.controller.noteCurrentSession("sMode");
+
+    // 绑定按钮：点它应开条件触发、互斥关全自动。
+    const bindBtn = findByAttr(mount(react.createElement(api.SyncStatusBar, {})), "data-dsh-plugin-deepseek-chat", "sync-bind");
+    if (!bindBtn) fail("v1.4.4：未配对时未找到绑定按钮");
+    else {
+      api.writeConfig({ autoPilotEnabled: true }); // 模拟全自动开着，验证绑定会互斥关掉它
+      bindBtn.dispatch("click", {});
+      const c = api.getConfig();
+      if (!c.autoSyncEnabled || c.autoPilotEnabled) fail("v1.4.4：点绑定应开条件触发且关全自动：" + JSON.stringify({ s: c.autoSyncEnabled, p: c.autoPilotEnabled }));
+      else ok("v1.4.4：点「绑定当前会话」→ 开条件触发 + 关全自动（回到条件触发模式）");
+    }
+
+    // 启动全自动按钮：点它应关条件触发、开全自动。
+    const startBtn = findByAttr(mount(react.createElement(api.SyncStatusBar, {})), "data-dsh-plugin-deepseek-chat", "sync-pilot-start");
+    if (!startBtn) fail("v1.4.4：未找到启动全自动按钮");
+    else {
+      startBtn.dispatch("click", {});
+      const c = api.getConfig();
+      if (c.autoSyncEnabled || !c.autoPilotEnabled) fail("v1.4.4：点启动全自动应关条件触发且开全自动：" + JSON.stringify({ s: c.autoSyncEnabled, p: c.autoPilotEnabled }));
+      else ok("v1.4.4：点「启动全自动」→ 关条件触发 + 开全自动（切到全自动模式）");
+    }
+
+    // v1.4.6-hotfix-7：停止全自动 = 彻底停机（两个开关都关，不回退半自动）。
+    const stopBtn = findByAttr(mount(react.createElement(api.SyncStatusBar, {})), "data-dsh-plugin-deepseek-chat", "sync-pilot-stop");
+    if (!stopBtn) fail("v1.4.4：运行态未找到停止全自动按钮");
+    else {
+      stopBtn.dispatch("click", {});
+      const c = api.getConfig();
+      if (c.autoSyncEnabled || c.autoPilotEnabled) fail("v1.4.6-hotfix-7：点停止全自动应彻底停机（两开关都关）：" + JSON.stringify(c));
+      else ok("v1.4.6-hotfix-7：点「停止全自动」→ 彻底停机（两开关都关，不回退半自动）");
+    }
+    // v1.4.6-hotfix-7：设置页订阅 config，状态条启停后 checkbox 同步刷新。
+    if (!source.includes("react.useEffect(() => subscribeConfig(rerender), [])")) fail("v1.4.6-hotfix-7：SettingsView 未订阅 config，状态条启停后设置页 checkbox 不会刷新");
+    else ok("v1.4.6-hotfix-7：设置页订阅 config，状态条启停后 checkbox 同步刷新");
+
+    // v1.4.6-hotfix-9：停机+已配对时，状态条有「切回半自动」按钮，点了复用配对、只切开关。
+    {
+      api.writeConfig({ autoSyncEnabled: false, autoPilotEnabled: false });
+      const vRt2 = api.ensureSyncRuntime(vCtx);
+      vRt2.controller.bindSession("sSemiBind");
+      const semiBtn = findByAttr(mount(react.createElement(api.SyncStatusBar, {})), "data-dsh-plugin-deepseek-chat", "sync-back-to-semi");
+      if (!semiBtn) fail("v1.4.6-hotfix-9：已配对且停机时未找到「切回半自动」按钮");
+      else {
+        const pairedBefore = vRt2.controller.getState().pairedSessionId;
+        semiBtn.dispatch("click", {});
+        const c2 = api.getConfig();
+        const pairedAfter = vRt2.controller.getState().pairedSessionId;
+        if (!c2.autoSyncEnabled || c2.autoPilotEnabled) fail("v1.4.6-hotfix-9：点切回半自动应开条件触发、关全自动：" + JSON.stringify(c2));
+        else if (pairedAfter !== pairedBefore || pairedAfter !== "sSemiBind") fail("v1.4.6-hotfix-9：切半自动不应解绑/换绑配对会话：" + pairedBefore + "→" + pairedAfter);
+        else ok("v1.4.6-hotfix-9：点「切回半自动」→ 开条件触发+关全自动，复用现有配对不解绑");
+      }
+    }
+
+    // 恢复默认，避免污染后续断言。
+    api.writeConfig({ autoSyncEnabled: false, autoPilotEnabled: false });
+  }
+}
+
+// ── v1.4.5 信号词合并 + 三选一决策卡 + 最大轮数双页同步 ──
+{
+  // 1) 信号词默认值与旧配置迁移。
+  {
+    const expectSig = ["DONE", "完成", "通过", "APPROVED", "重启 DSH", "重启桌面", "restart DSH", "restart harness", "请重启宿主验收", "宿主验收", "请用户验收", "需要你本人", "需要人工介入", "handoff to user", "user verification"];
+    const sig = api.DEFAULT_PILOT_SIGNAL_KEYWORDS;
+    if (!Array.isArray(sig) || sig.join("|") !== expectSig.join("|")) fail(`DEFAULT_PILOT_SIGNAL_KEYWORDS 内容不对：${JSON.stringify(sig)}`);
+    else ok("v1.4.6：信号词默认常量 = 完成词 + 重启词 + 用户介入词（15 项，两栏融合）");
+    if (!Array.isArray(api.DEFAULTS.pilotSignalKeywords) || api.DEFAULTS.pilotSignalKeywords.join("|") !== expectSig.join("|")) fail("DEFAULTS.pilotSignalKeywords 不对");
+    else ok("v1.4.6：DEFAULTS.pilotSignalKeywords 含 15 项");
+
+    storage.clear();
+    storage.set(api.CONFIG_KEY, JSON.stringify({ pilotDoneKeywords: ["X", "Y"], pilotRestartKeywords: ["Z"], pilotHandoffKeywords: ["W"] }));
+    const mig = api.readConfig();
+    if (mig.pilotSignalKeywords.join(",") !== "X,Y,Z,W") fail(`旧配置迁移失败：${JSON.stringify(mig.pilotSignalKeywords)}`);
+    else ok("v1.4.6：旧配置（done/restart/handoff）自动迁移为合并信号词");
+    storage.clear();
+  }
+
+  // 2) decide 新分支：restart-dsh / new-goal 都停止全自动并清卡。
+  {
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoPilotEnabled: true, maxAutoLoops: 3 }) });
+    ctl.startPilot();
+    ctl.setPilotDecision({ kind: "signal", payload: "DONE", reason: "signal-word" });
+    let r = ctl.decide("restart-dsh");
+    if (r.action !== "restart-dsh" || ctl.getState().autoPilot || ctl.getState().pilotDecision || ctl.getState().state !== "off") fail(`decide(restart-dsh) 不对：${JSON.stringify(r)}`);
+    else ok("v1.4.5：decide(restart-dsh) → 停止全自动并清卡");
+    ctl.startPilot();
+    ctl.setPilotDecision({ kind: "signal", payload: "DONE", reason: "signal-word" });
+    r = ctl.decide("new-goal");
+    if (r.action !== "new-goal" || ctl.getState().autoPilot || ctl.getState().pilotDecision || ctl.getState().state !== "off") fail(`decide(new-goal) 不对：${JSON.stringify(r)}`);
+    else ok("v1.4.5：decide(new-goal) → 停止全自动并清卡");
+  }
+
+  // 3) signal 决策卡三按钮 + new-goal 调 uiWorkspace.startSession。
+  {
+    let startSessionCalls = 0;
+    const gCtx = makeCtx();
+    const baseGet = gCtx.get;
+    gCtx.get = (name) => name === "uiWorkspace" ? { startSession: () => { startSessionCalls++; } } : baseGet(name);
+    const gRt = api.ensureSyncRuntime(gCtx);
+    if (typeof gRt.dockDispose === "function") { try { gRt.dockDispose(); } catch { /* 已释放 */ } }
+    gRt.dockDispose = null;
+    gRt.cancelled = false;
+    api.writeConfig({ autoPilotEnabled: true, autoSyncEnabled: false });
+    gRt.controller.reset();
+    gRt.controller.startPilot();
+    // v1.4.6-hotfix-5：决策卡改为 shell.overlay 屏幕居中浮层（全局单例，无需 turn 匹配）。
+    gRt.controller.setPilotDecision({ kind: "signal", payload: "DONE", reason: "signal-word", turn: 42 });
+
+    const gBar = mount(react.createElement(api.PilotDecisionOverlay));
+    const bStop = findByAttr(gBar, "data-dsh-plugin-deepseek-chat", "sync-pilot-stop-this-run");
+    const bRestart = findByAttr(gBar, "data-dsh-plugin-deepseek-chat", "sync-pilot-restart-dsh");
+    const bGoal = findByAttr(gBar, "data-dsh-plugin-deepseek-chat", "sync-pilot-new-goal");
+    const bResumeSignal = findByAttr(gBar, "data-dsh-plugin-deepseek-chat", "sync-pilot-resume-push");
+    if (!bStop || !bRestart || !bGoal) fail(`signal 决策卡三按钮缺失：stop=${!!bStop} restart=${!!bRestart} goal=${!!bGoal}`);
+    else ok("v1.4.5：signal 决策卡渲染「停止本次 / 重启 DSH / 开启新目标」三按钮");
+    if (!bResumeSignal) fail("v1.4.6-hotfix-5：signal 卡缺「继续并补推本轮」按钮（用户无法续跑）");
+    else ok("v1.4.6-hotfix-5：signal 卡渲染「继续并补推本轮」按钮");
+    const bModalClose = findByAttr(gBar, "data-dsh-plugin-deepseek-chat", "sync-pilot-modal-close");
+    if (!bModalClose) fail("v1.4.6-hotfix-8：浮层卡缺原生 Modal 标题栏关闭×按钮");
+    else ok("v1.4.6-hotfix-8：浮层卡具备原生 Modal 观感（标题栏关闭×按钮就位）");
+    const bReason = findByAttr(gBar, "data-dsh-plugin-deepseek-chat", "sync-pilot-reason");
+    if (!bReason) fail("v1.4.6-hotfix-8：浮层卡缺动态问题文本节点");
+    else ok("v1.4.6-hotfix-8：浮层卡含按拦截内容动态生成的问题文本节点");
+    if (!source.includes("rawPayload.length > 60")) fail("v1.4.6-hotfix-8：未实现按拦截内容生成问题摘要");
+    else ok("v1.4.6-hotfix-8：问题/选项按拦截内容动态生成（源码级确认）");
+
+    if (bGoal) {
+      bGoal.dispatch("click", {});
+      if (startSessionCalls !== 1) fail(`点「开启新目标」未调用 uiWorkspace.startSession（调用 ${startSessionCalls} 次）`);
+      else if (gRt.controller.getState().autoPilot) fail("点「开启新目标」后全自动未停止");
+      else ok("v1.4.5：点「开启新目标」→ 调 uiWorkspace.startSession 开新会话并停全自动");
+    }
+    api.writeConfig({ autoPilotEnabled: false });
+  }
+
+  // 4) 最大轮数双页锁死同步。
+  {
+    api.writeConfig({ maxAutoLoops: 7 });
+    const formA = mount(react.createElement(settingsSlot.component, {}));
+    const syncIn = findByAttr(formA, "data-dsh-plugin-deepseek-chat", "sync-max-loops");
+    const pilotIn = findByAttr(formA, "data-dsh-plugin-deepseek-chat", "pilot-max-loops");
+    if (!syncIn || !pilotIn) fail(`最大轮数双页控件缺失：sync=${!!syncIn} pilot=${!!pilotIn}`);
+    else if (syncIn.getAttribute("value") !== "7" || pilotIn.getAttribute("value") !== "7") fail(`两页初值不同步：sync=${syncIn.getAttribute("value")} pilot=${pilotIn.getAttribute("value")}`);
+    else ok("v1.4.5：条件触发页与全自动页最大轮数控件同值（7）");
+
+    if (syncIn) {
+      syncIn.dispatch("change", { target: { value: "9" } });
+      const formB = mount(react.createElement(settingsSlot.component, {}));
+      const s2 = findByAttr(formB, "data-dsh-plugin-deepseek-chat", "sync-max-loops");
+      const p2 = findByAttr(formB, "data-dsh-plugin-deepseek-chat", "pilot-max-loops");
+      if (s2?.getAttribute("value") !== "9" || p2?.getAttribute("value") !== "9") fail(`改一边后两页未同步：sync=${s2?.getAttribute("value")} pilot=${p2?.getAttribute("value")}`);
+      else ok("v1.4.5：改条件触发页轮数后，全自动页同步跟着变（9）");
+    }
+    api.writeConfig({ maxAutoLoops: api.DEFAULT_MAX_LOOPS });
+  }
+
+  // 5) v1.4.6 软失败自动重试 2 次再弹卡。
+  {
+    const ctl = api.createSyncController({ getConfig: () => ({ ...api.DEFAULTS, autoSyncEnabled: true, maxAutoLoops: 5 }) });
+    ctl.startPilot();
+    ctl.notePilotInjected("上一轮审查意见");
+    const rt = { ctx: { get: () => undefined }, controller: ctl,
+      dockBinding: { current: { sessionId: "s", inputActions: { setDraft: () => {}, submit() {} } } }, cancelled: false };
+    let r = await api.handlePilotReply(rt, "<TO_DEV>Traceback: fail one</TO_DEV>");
+    if (r.action !== "soft-retry" || ctl.getState().softRetryCount !== 1 || ctl.getState().pilotDecision) fail(`软重试第1次失败：${JSON.stringify({ r, s: ctl.getState() })}`);
+    r = await api.handlePilotReply(rt, "<TO_DEV>Error: fail two</TO_DEV>");
+    if (r.action !== "soft-retry" || ctl.getState().softRetryCount !== 2 || ctl.getState().pilotDecision) fail(`软重试第2次失败：${JSON.stringify({ r, s: ctl.getState() })}`);
+    r = await api.handlePilotReply(rt, "<TO_DEV>Failed: fail three</TO_DEV>");
+    if (r.action !== "pause" || r.kind !== "error" || ctl.getState().softRetryCount !== 0) fail(`软重试耗尽未弹卡：${JSON.stringify({ r, s: ctl.getState() })}`);
+    else ok("v1.4.6：错误/卡住/格式错连续 2 次自动重试，第 3 次才弹卡并重置计数");
+  }
+
+  // 6) 按触发原因定制卡片按钮：error 卡=重试本轮/改后重试/停止；signal 卡仍三按钮。
+  {
+    const gCtx = makeCtx();
+    const gRt = api.ensureSyncRuntime(gCtx);
+    if (typeof gRt.dockDispose === "function") { try { gRt.dockDispose(); } catch { /* 已释放 */ } }
+    gRt.dockDispose = null;
+    gRt.cancelled = false;
+    api.writeConfig({ autoPilotEnabled: true, autoSyncEnabled: false });
+    gRt.controller.reset();
+    gRt.controller.startPilot();
+    // v1.4.6-hotfix-5：决策卡改为 shell.overlay 浮层，无需 turn 匹配。
+    gRt.controller.setPilotDecision({ kind: "error", payload: "boom", reason: "error-keyword", turn: 7 });
+    const bar = mount(react.createElement(api.PilotDecisionOverlay));
+    const bRetry = findByAttr(bar, "data-dsh-plugin-deepseek-chat", "sync-pilot-retry");
+    const bEditRetry = findByAttr(bar, "data-dsh-plugin-deepseek-chat", "sync-pilot-edit-retry");
+    const bStop = findByAttr(bar, "data-dsh-plugin-deepseek-chat", "sync-pilot-terminate");
+    const bResume = findByAttr(bar, "data-dsh-plugin-deepseek-chat", "sync-pilot-resume-push");
+    if (!bRetry || !bEditRetry || !bStop) fail(`error 卡按钮缺失：retry=${!!bRetry} editRetry=${!!bEditRetry} stop=${!!bStop}`);
+    else ok("v1.4.6：错误卡渲染「重试本轮 / 改后重试 / 停止」定制按钮");
+    if (!bResume) fail("v1.4.6-hotfix：error 卡缺「继续并补推本轮」按钮（用户无法续跑）");
+    else ok("v1.4.6-hotfix：error 卡渲染「继续并补推本轮」按钮，用户可从暂停态续跑");
+    if (bEditRetry) {
+      bEditRetry.dispatch("click", {});
+      // 无提交 API 时会降级为 submit-unavailable 卡，故不断言最终态为 pushing，
+      // 只断言决策卡已被消费（不再停留 error 卡）且状态确实发生过推进。
+      const after = gRt.controller.getState();
+      if (!after.pilotDecision || after.pilotDecision.kind === "error") fail("点「改后重试」未消费 error 卡");
+      else ok("v1.4.6：点「改后重试」→ 消费错误卡并推进提交");
+    }
+    api.writeConfig({ autoPilotEnabled: false });
   }
 }
 

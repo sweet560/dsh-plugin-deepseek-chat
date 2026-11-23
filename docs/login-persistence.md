@@ -99,6 +99,28 @@ partition = `persist:dsh-sidebar-browser-chat-v1`;
 
 DSH 每次升级都会覆盖 `app.asar`、把分区还原成随机内存分区，升级后重跑本脚本即可（已在 DSH 0.2.2-rc.3 实测；`Partitions` 里的登录数据不会丢）。
 
+#### 运行日志与「闪退 / 没生效」排错（v2 脚本）
+
+一键脚本从 v2 起会把**每一步**都追加到日志（旧版全程无日志，无法事后判断卡在哪）：
+
+| 日志 | 内容 |
+|---|---|
+| `%TEMP%\dsh_patch_oneshot.log` | 一键脚本自身的完整步骤流水（提权 / 定位 / 关进程 / dry-run / apply / 重启，含成功与中止原因） |
+| `%TEMP%\dsh_patch_dry.log` | dry-run 校验输出（应含 `integrity: ... 0 failed`） |
+| `%TEMP%\dsh_patch_run.log` | 真正打补丁的输出（应含 `patched:` / `backup :` / `0 failed`，或 `already patched`） |
+
+**看到「窗口一闪就没了 / 所有 DSH 窗口都关了」不一定是崩溃**：补丁要求独占 `app.asar`，脚本在定位成功后会 `taskkill /F` 全部 `DeepSeek Harness.exe`，这会连带关掉你正在用的 DSH 聊天会话窗口，属于正常步骤（v2 已在此处明确提示"这会关闭包括本聊天在内的所有 DSH 窗口，并非崩溃"）。判断到底成没成功，**只认日志和落盘，不认窗口现象**：
+
+- 打开 `%TEMP%\dsh_patch_oneshot.log`，从下往上看到最后一行：
+  - 有 `[OK] patch written` 或 `[i] target already patched`，且 `dsh_patch_run.log` 里有 `0 failed` → **成功**。
+  - 有 `[X] ...` 行 → 按该行原因处理（如 `Processes still running` 表示 DSH 没关干净，去任务管理器确认 `DeepSeek Harness.exe` 归零后重跑）。
+  - 日志停在 `[*] Sending taskkill /F` 之后就没有了 → 脚本在关进程那步被中断（见下）。
+- 交叉验证：`app.asar` mtime 是否变化、是否生成 `app.asar.bak-<时间戳>` 备份、`resources` 下 persist 语句是否写入。
+
+**若 win 上脚本"运行一会儿就退出、日志停在提权处"**：多为 UAC 自动提权分支——普通权限实例请求提权后会 `exit /b` 静默退出，真正的工作在新弹出的管理员窗口里做；留意屏幕是否有新窗口/二次 UAC 提示，并以**管理员身份"以管理员运行"**直接打开脚本可绕过此分支。
+
+> 实测教训（2026-11-19）：一次"重启电脑后运行脚本仍闪退"，日志显示定位成功、却无 dry-run/apply 日志、`app.asar` 未变——根因是脚本走到 `taskkill` 全部 DSH（含当前聊天会话）那一步后，从用户视角看就是"窗口全没了"，加上旧版无日志、等待进程退出的 `timeout` 在重定向 stdin 下可能失效，导致误判"进程仍在"而中止。v2 已改为：全量落盘日志、ping 式等待 + 12 次重试、明确提示会关闭聊天窗、结尾自动询问是否重启 DSH。
+
 ### 手动调用脚本（可选 / 自定义）
 
 上游仓库配套的 `patch-dsh-persistent-partition.cjs` 已适配逐文件 ASAR integrity，支持 `--dry-run`、幂等重跑、自动备份与**全量哈希校验**：

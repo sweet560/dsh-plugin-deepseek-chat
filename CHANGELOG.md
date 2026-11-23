@@ -2,6 +2,63 @@
 
 All notable changes to this project are documented here.
 
+## 1.4.6 — 2026-11-23
+
+> 全自动流程初步真机验证通过，正在不断完善中。本版为 1.4.5 包上的真机验证修复批（代码内以 `v1.4.6-hotfix-1~9` 注释标记），按用户决策升 patch 版本。
+
+- **决策卡架构重做**：从网页状态条 → 桌面会话 `conversation.chat.turnTail` → 最终改用原生 `shell.overlay` 浮层；按 DSH 原生 Modal 观感自绘（居中、遮罩变暗、标题栏关闭 ×、分隔内容区、footer 规整按钮），用 `createPortal` 渲染到 `document.body` 绕开 overlay slot 的 containing block 使遮罩铺满全屏。官方禁止第三方 bundle `require('@deepseek-ai/dsh-client-ui-primitives')`，故复制 Markup/CSS/行为（focus + Escape）到本包、类名加 `dscModal*` 前缀、保留 `--dsw-alias-*` token，零新增依赖。
+- **动态问题/选项**：决策卡问题文本与选项按当轮拦截内容实时生成（超长摘要截断），不再写死固定文案；所有卡型（信号词/错误/介入/最大轮数）首位统一「继续并补推本轮」入口。
+- **resume-push 通道方向修复**：「继续并补推本轮」原误走 `tryAutoSubmit` 把回复提交回桌面会话，改为返回 `{action:"push-web"}`→`pushAnswerToWeb`，真正补推到网页审查 agent。
+- **错误词词边界修复**：`containsErrorKeyword` 原 `indexOf` 子串匹配导致正文里 `TypeError` 内嵌的 `Error` 被误判熔断；纯字母错误词改用词边界正则（独立词命中、单词内嵌不命中），借鉴 `isPureDoneText` 现成逻辑。
+- **暂停态决策卡可续跑**：max-loops / error-keyword 熔断原用裸 `set("paused")` 不设 `pilotDecision`，状态栏显示「已暂停」却没有卡片按钮，用户卡死；改走 `setPilotDecision` 弹卡。
+- **设置项默认关闭**：全自动是「由你启动/终止」的一次性模式，插件初始化时归零残留的 `config.autoPilotEnabled`，消除「设置页勾选但状态条未启动」的不一致。
+- **豆包状态齿轮直达设置**：`focusDeepSeekChatSection` 的导航 label 由硬编码 DeepSeek 两变体扩展为含「豆包 聊天 / Doubao Chat / platformDisplayName()」，修复豆包状态下点齿轮停在「账号与余额」页。
+- **停止全自动彻底停机**：停止按钮原 `writeConfig({autoSyncEnabled:true})` 会偷偷回退到半自动，改为两开关都关；`SettingsView` 订阅 `subscribeConfig` 使状态条启停后设置页 checkbox 同步刷新。
+- **一键切回半自动**（hotfix-9）：停机且已配对时状态条出现「切回半自动」，点击只 `writeConfig({autoSyncEnabled:true,autoPilotEnabled:false})`、复用现有配对不解绑，靠配置订阅自动 off→idle。
+- **版本 1.4.5→1.4.6**：package.json / lib/client.js（PLUGIN_VERSION）/ README 中英 / CHANGELOG / docs/RELEASE_NOTES_v1.4.6.md 同步；新增多条 hotfix 回归断言，`RESULT: PASS`。
+
+## 1.4.5 — 2026-11-19
+
+- 设置页两栏融合 + 决策卡定制：原「信号词」与「用户介入词」合并为单一信号词栏（15 项默认词，`readConfig` 对旧配置自动迁移 done/restart/handoff 三键）；按触发原因弹不同按钮组合的卡——信号词（完成/重启）=停止本次/重启 DSH/开新目标，用户介入词=我已处理继续/停止，错误或卡住或格式错=重试本轮/改后重试/停止，轮数上限/其它=继续/停止。介入词优先判 handoff 弹验收卡且不再被误判为「任务完成」；新增 `pilotHandledContinue` / `pilotEditRetry` 文案与 `edit-retry` 动作。
+- 软失败自动重试 2 次再弹卡：错误词 / 重复回复（卡住）/ 无区块或空区块（格式错）先自动重投上一轮审查意见，连续 2 次仍失败才弹卡交用户；信号词、最大轮数等硬决策仍立即弹卡。控制器新增 `softRetryCount` 状态（snapshot 暴露）与 `noteSoftRetry()` / `resetSoftRetry()`，`startPilot()` / `reset()` 自动清零；`handlePilotReply` 在 pause 分支前拦截软失败。
+- 平台名称联动：切换 DeepSeek / 豆包平台时，顶部标签栏名称、右边栏卡片名称、左侧栏插件项、设置页导航与标题一并改为该平台默认名（DeepSeek 聊天 / 豆包 聊天，格式统一），随后仍可手动单独修改。两套预设各带 `tabLabel` / `cardLabel`，`applyPlatformPreset` 整包写入；新增 `platformDisplayName()` / `settingsTitleText()` 动态 thunk，注册项与名称变更时按需 dispose + 重注册；设置页草稿与中英文提示同步。
+- 名称输入框统一灰色占位：切平台后顶部标签名 / 右边栏卡片名输入框清空草稿、以当前平台默认名显示灰色占位（可直接输入覆盖）；留空时回退到当前平台默认名而非全局 DeepSeek 默认。新增 `platformDefaultLabel()`，输入框 `placeholder` 随平台联动。
+- 完成词 + 重启词合并为「信号词」：设置页合一，命中任一信号词即弹统一三选一决策卡——停止本次全自动（半自动）/ 重启 DSH（提示手动重启并停全自动）/ 开启新的任务目标（新建会话并切过去）。新增 `DEFAULT_PILOT_SIGNAL_KEYWORDS`，`readConfig` 对旧配置自动迁移；`classifyPilotReply` 统一返回 `kind:"signal"`；`decide` 新增 `restart-dsh` / `new-goal` 两分支。
+- 最大轮数双页锁死同步：「全自动通道」页复制「最大自动轮数」控件（`pilot-max-loops`），与「条件触发同步」页的 `sync-max-loops` 共用同一 `config.maxAutoLoops` + `onMaxLoopsChange`，改一边另一边立即跟着变。
+- 修复全自动死循环：区块内纯完成语义（如 `<TO_DEV>任务已完成</TO_DEV>`）判 `done` 终止链条，不再当新任务回投——一并解决连续两次重复回复与最终 180s 超时。
+- 新增 `isPureDoneText(text, doneWords)`，区块内与无区块两处统一调用，中文「独占行/短声明结尾」与英文「词边界」规则一致；区块内真实任务（含「已…」字样）仍判 `continue`。
+- 适配版本同步：实机核对宿主 DSH desktop 与 runtime 均为 `0.2.2-rc.5`，`engines.dsh` 与 README 中英当前版本行/环境要求表从 `0.2.2-rc.3` 更新到 `0.2.2-rc.5`；历史记录中的 rc.3 按约定保留不动。
+- 版本 1.4.4→1.4.5：package.json / lib/client.js / README / CHANGELOG / docs/RELEASE_NOTES_v1.4.5.md / docs/全自动流程使用介绍.md 同步；新增 2 条回归断言，`RESULT: PASS`。
+
+## 1.4.4 — 2026-11-18
+
+- 双模式互斥联动：「绑定当前会话」按钮 = 回到**条件触发式同步**（自动开 autoSyncEnabled、互斥关全自动）；「启动全自动」= 关条件触发、开全自动通道；「停止全自动」退回条件触发闭环。
+- 引擎总闸解耦：新增 `isEngineActive`（条件触发或全自动任一开启即工作），替换引擎内 5 处 `autoSyncEnabled` 单点判断（trace / refresh / handleTurnEnd / reset / dock 注册 / startAutoPilot）。切全自动关掉条件触发后，dock、会话订阅、turn/end 驱动不再瘫痪。
+- 安全阀不变：`DEFAULTS.autoSyncEnabled` / `autoPilotEnabled` 仍为 false，一切模式切换均由用户主动点击触发，绝不自动启动。
+- 版本 1.4.3→1.4.4：package.json / lib/client.js / README / CHANGELOG / locale / docs/RELEASE_NOTES_v1.4.4.md 同步；新增 6 条双模式断言，`RESULT: PASS`。
+
+## 1.4.3 — 2026-11-18
+
+- 状态条改为**固定显示**：不再依赖「条件触发式自动闭环同步」开关（autoSyncEnabled）才出现，进入聊天面板即常驻，可随时查看轮次 / 绑定 / 启停状态。
+- 状态条「▶启动全自动」按钮在总开关关闭时可直接点击：这是用户主动授权，点击时顺带开启 autoSyncEnabled；默认 autoSyncEnabled 仍为 false，「绝不自动启动」安全阀不变。
+- 纯网页聊天断言改为按语义校验「有且仅有一个 webview」，兼容状态条常驻后全屏面板 / 顶栏标签页两种包装层。
+- 版本 1.4.2→1.4.3：package.json / lib/client.js / README / CHANGELOG / locale / docs/RELEASE_NOTES_v1.4.3.md 同步；离线自检 `RESULT: PASS`。
+
+## 1.4.2 — 2026-11-18
+
+- 设置页「聊天网页 URL」输入框改为 **DeepSeek / 豆包 双平台切换按钮**：选中即高亮，点击整包切换，无需手填 URL。
+- 新增平台预设 `PLATFORM_PRESETS`：`deepseek` / `doubao` 两套，每套 = 网页 URL + 停止/发送/输入框/助手回复/用户消息 五组 DOM 选择器。`applyPlatformPreset(name)` 一次 `writeConfig` 写入整套；`currentPlatform()` 从 URL 主机推导当前平台（单一数据源）。
+- 切豆包自动适配：写入豆包 URL 触发 `subscribeConfig` → webview 重载 → 桥用新选择器重装，自动闭环 / 全自动通道随之跟随，无需改桥或导航。豆包选择器取自现成轮子（greasyfork「AI 对话助手」/ under-the-ocean/doubao-api）。
+- 原 `parseChatUrl`/`parsePopupUrl`/导航逻辑零改动，`chat.deepseek.com` 主路径零回归；测试新增预设完整性/整包切换/持久化/恢复默认/未知名返回 false，双按钮存在性断言，`RESULT: PASS`。
+- 版本 1.4.1→1.4.2：package.json / lib/client.js / README / CHANGELOG / locale / docs/RELEASE_NOTES_v1.4.2.md 同步。
+
+## 1.4.1 — 2026-11-18
+
+- 设置页新增「聊天网页 URL」自定义输入框：默认 `https://chat.deepseek.com/`，填入 `https://www.doubao.com/chat/` 即切换到豆包网页版，留空恢复默认，改完即时生效。
+- 新增独立白名单 `normalizeChatUrl` / `CUSTOM_URL_HOSTS`（DeepSeek、豆包），只接受 https、无凭据、无显式端口；不改动原会话记忆与弹窗白名单。
+- 导航：DeepSeek 保留原会话恢复行为，豆包直接加载配置 URL；`subscribeConfig` 即时切换。
+- 版本 1.4.0→1.4.1：package.json / lib/client.js / README / CHANGELOG / locale / docs/RELEASE_NOTES_v1.4.1.md 同步；离线自检 `RESULT: PASS`。
+
 ## 1.4.0 — 2026-11-17
 
 > ⚠️ **发布标注：本版「全自动投递通道」尚未经过真机实验**，仅通过离线自检（`RESULT: PASS`），尚未在真实 DSH 桌面环境跑通完整链条；请先小范围试用并观察 loop-trace，异常可用状态栏「■ 停止全自动」随时接管。原有的条件触发式自动闭环（v1.2.x）与半自动带回（v1.2.1）已实机验证，本版未改其主路径。

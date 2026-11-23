@@ -1,7 +1,7 @@
 {
   "name": "@tianyulinfeng1/dsh-plugin-deepseek-chat",
-  "version": "1.4.0",
-  "description": "A DSH plugin that embeds chat.deepseek.com and two-way bridges desktop conversations with the web chat: three chat entries, an optional auto-loop (web reply → desktop draft only), and a v1.4.0 full auto-pilot channel that extracts a delimited review block, auto-submits the next turn via official conversation.send and pauses on a decision card you control.",
+  "version": "1.4.6",
+  "description": "A DSH plugin that embeds a configurable web chat URL with one-click DeepSeek / Doubao platform presets and two-way bridges desktop conversations with the web chat: three chat entries, an optional auto-loop (web reply → desktop draft only), and a full auto-pilot channel that extracts a delimited review block, auto-submits the next turn via official conversation.send and pauses on a native Modal decision card you control. Status bar stays fixed; bind for trigger mode, start auto-pilot for full-auto, stop to fully halt, and switch back to semi-auto in one click. Full auto-pilot flow passed initial real-machine verification and is being refined.",
   "type": "module",
   "main": "lib/index.js",
   "icon": "./icon.svg",
@@ -24,6 +24,13 @@
     "docs/RELEASE_NOTES_v1.1.9.md",
     "docs/RELEASE_NOTES_v1.1.10.md",
     "docs/RELEASE_NOTES_v1.4.0.md",
+    "docs/RELEASE_NOTES_v1.4.1.md",
+    "docs/RELEASE_NOTES_v1.4.2.md",
+    "docs/RELEASE_NOTES_v1.4.3.md",
+    "docs/RELEASE_NOTES_v1.4.4.md",
+    "docs/RELEASE_NOTES_v1.4.5.md",
+    "docs/RELEASE_NOTES_v1.4.6.md",
+    "docs/全自动流程使用介绍.md",
     "docs/screenshot.png",
     "docs/screenshot-chat.png",
     "icon.svg",
@@ -58,7 +65,7 @@
   "homepage": "https://github.com/sweet560/dsh-plugin-deepseek-chat#readme",
   "engines": {
     "node": ">=24",
-    "dsh": ">=0.2.2-rc.3"
+    "dsh": ">=0.2.2-rc.5"
   },
   "dsh": {
     "manifestVersion": 1,
